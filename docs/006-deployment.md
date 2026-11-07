@@ -5,8 +5,8 @@ Use this guide to install, configure and operate dsh-superagent. It covers accou
 ## What runs
 
 - **A dedicated DeepSeek Harness profile**, called `superagent` in this guide. Create it from the Web profile template. It loads the bundle and serves its panel on `127.0.0.1`. Keep it separate from the profile you work in: the plugin changes process-wide `PATH` and git settings, and its process needs independent restarts and upgrades.
-- **One Redmine account, bound to the Source.** In a company that is the operator's own account, and no separate agent account is needed: the agent reads the issues assigned to it, posts notes on them and takes work as that account, through a Redmine REST API key. In a deployment where the agent has an identity of its own, that account is the bound one.
-- **An agent Gerrit account.** The agent clones the ticket's repository, pushes patches for review and answers reviewers as this account, through an SSH key and an HTTP password.
+- **One Redmine account, bound to the Source.** In a company that is the operator's own account, and no separate agent account is needed: the agent reads the issues assigned to it, posts notes on them and takes work as that account, through a Redmine REST API key. In a deployment where the agent has an identity of its own, that account is the bound one. In the local environment of this repository it is the developer's account, `dev`.
+- **An agent Gerrit account.** The agent clones the ticket's repository, pushes patches for review and answers reviewers as this account, through an SSH key and an HTTP password. In the local environment it is the developer's account as well, `dev`.
 - **Optional:** a Feishu bot for chat requests.
 
 Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the accounts, Policy for allowed lists, and Execution for worker directories and commands.
@@ -47,7 +47,7 @@ The Redmine Source binds to one account. In a company that is the operator's own
    ```
 
    Register the public key under *Settings* → *SSH keys* of that account, and set an HTTP password under *Settings* → *HTTP password*.
-2. Give the account *Developer* (or better) on the repositories it works in, and *Submit* on the target branch. A person submits the change: the agent never merges its own work.
+2. Give the account *Developer* (or better) on the repositories it works in, and *Submit* on the target branch. A person submits the change: the agent never merges its own work. In the company of `docs/010-corporate-redmine-gerrit.md` this account is the developer's, and the merge right belongs to the leader, because Gerrit asks for a review by somebody else.
 3. Put the key's path in the Gerrit Source's settings. dsh-superagent writes it into the worker's git configuration, so a worker's `git push` reaches the review server without a host key prompt.
 
    ```sh
@@ -55,6 +55,40 @@ The Redmine Source binds to one account. In a company that is the operator's own
    ```
 
    dsh-superagent writes this itself into its own isolated git configuration; the line above is only what a person needs for their own pushes to the same server.
+
+### The accounts of the local environment
+
+The Docker Compose stack in `env/` runs this deployment locally. It carries the three roles of the company in both systems, and the superagent binds to the developer in both of them:
+
+| Role | Redmine, `http://localhost:3000` | Gerrit, `http://localhost:8080` |
+| --- | --- | --- |
+| `admin` | "System Administrator", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
+| `lead` | "Wang Lei", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
+| `dev` | "Zhang Wei", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
+
+The passwords, the API keys and the addresses are in `env/.env`, which is the source of truth for the stack; `env/README.md` describes it in full.
+
+`env/accounts.sh` provisions the role system on a running stack, and it is idempotent: running it again only applies what is missing. `env/seed.sh` calls it before it seeds the projects and the issues.
+
+- The Redmine accounts come from the `redmine-init` job of the stack, because the Redmine REST API cannot create users. The script checks that each role exists and that its API key answers.
+- The `dev` account of the review server is created over the REST API, and it carries the SSH key of the superagent: a push over SSH needs nothing else.
+- The `lead` account of the review server is created by signing in over HTTP, with `curl -u <login>:<password> <address>/login`. Only that flow gives an account the external id `gerrit:<login>` that the HTTP authentication mode looks the user up by, so only that account works in the browser.
+- The groups `Developers` and `Reviewers` carry the rights of the roles. The REST API of Gerrit 2.15 cannot create groups, so `env/accounts.sh` creates them over SSH, with `gerrit create-group`.
+
+`env/verify.sh` checks the role system, and with it the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it.
+
+### The sign-in page of the environment
+
+The stack serves a sign-in page on `http://localhost:3001/`. It lists the two systems and, for each of them, the three roles; one click signs the role in and opens the system. Signing in as another role replaces the session of that system only.
+
+The service is `env/login/server.py`, a program of the Python standard library. It keeps two sessions:
+
+| System | What the page stores | How the session lasts |
+| --- | --- | --- |
+| Gerrit | the cookie `dsh_auth`, the credential of the role in base64 | the front end of the review server, `env/gerrit/nginx.conf`, hands that credential over to Gerrit instead of challenging the browser |
+| Redmine | the cookie `_redmine_session`, the session of Redmine itself | the service signs in against the login form of Redmine and hands its session cookie to the browser; the session of Redmine lasts 30 days |
+
+The cookie `dsh_auth` carries the credential of the role in base64: a convenience of this local mock, not a secret store. `GET /whoami` answers with the role that is signed in per system.
 
 ### Feishu bot (optional)
 
@@ -240,6 +274,8 @@ A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write s
 ## Try it
 
 From an account on the allowed list, open an issue in the task system that mentions the bound account (`@<login> <request>`) or assign it to the bound account. Within a polling interval (30 seconds by default), Overview should show a Ticket and the workbench should list the task. The agent acknowledges the request, works in its own Session and directory, and writes the result back as a note on the issue. For Feishu, mention the bot in a configured chat.
+
+In the local environment, the sign-in page opens the task system as the leader or as the developer with one click, and the leader's issue, assigned to the developer, is the request that starts the work.
 
 ## Upgrade
 

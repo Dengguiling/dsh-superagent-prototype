@@ -2,14 +2,28 @@
 
 This is the deployment of dsh-superagent in a company whose tasks live in Redmine and whose code is reviewed in Gerrit, in many repositories. The flow is:
 
-1. The project manager opens a Redmine issue and assigns it to the operator's account, the one account the agent is bound to.
+1. The leader writes the issue in Redmine and assigns it to the developer.
 2. The Redmine Source reads it, the Eval accepts it, and a Ticket opens.
 3. A worker Session works in the Ticket's directory, and clones the repository named by the issue's Redmine project identifier.
-4. The worker commits, names the issue in the commit message with an `Issue:` trailer, pushes the patch to `refs/for/<branch>`, and reports the change number.
+4. The worker commits, names the issue in the commit message with an `Issue:` trailer, pushes the patch to `refs/for/<branch>` as the developer, and reports the change number.
 5. The Gerrit Source finds that change by the trailer, in whichever repository it lives, and hands the review comments on it to the same worker.
-6. A reviewer merges the change; the Ticket ends, and the outcome is written back to the Redmine issue as a note.
+6. The developer, or the leader, reviews the change in the web UI of the review server, in the page the push printed; the leader gives it Code-Review +2 and merges it. The Ticket ends, and the outcome is written back to the Redmine issue as a note.
+
+In Gerrit the author of a change may not merge it: the review server asks for a review by somebody else. The merge is the leader's work.
 
 The Sources, the prompt sections and the skills of this deployment are the built-in ones; only the account settings differ from the general deployment of [006 Deployment](006-deployment.md).
+
+## The three roles
+
+The company has three roles, and both systems know them:
+
+| Role | Redmine | Gerrit |
+| --- | --- | --- |
+| `admin` — the system administrator | "System Administrator", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
+| `lead` — the leader | "Wang Lei", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
+| `dev` — the developer | "Zhang Wei", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
+
+The passwords, the API keys and the addresses of the local environment are in `env/.env`; `env/README.md` describes the stack in full.
 
 ## What this deployment uses
 
@@ -19,9 +33,17 @@ The Sources, the prompt sections and the skills of this deployment are the built
 | The work | — | A patch pushed to `refs/for/<branch>` |
 | The review | — | Comments on the change |
 | The end | The result is written back as a note on the issue | The change is submitted |
-| The agent's identity | The operator's own account, bound through its API key; no separate agent account | A Gerrit account with an SSH key and an HTTP password |
+| The agent's identity | The developer's account, bound through its API key; no separate agent account | The developer's account, with the SSH key of the superagent and an HTTP password |
 
-One Redmine account is enough. In the company the operator already has an account and cannot create another one, so the Source binds to the operator's own account: the project manager assigns the issues to it, and the agent reads and answers them as it. The Source still tells the agent's notes and the panel's notes from a person's by markers, so the operator's own Redmine notes on an issue reach the agent as human input even though the account is shared.
+## The account of the superagent
+
+The superagent binds to the developer and to nobody else:
+
+- the Redmine account is `dev`, "Zhang Wei", and the Redmine Source takes the issues assigned to it;
+- the Gerrit account is `dev`, and the SSH address of the Source is `ssh://dev@localhost:29418`;
+- there is no account of the agent's own, in neither system.
+
+The developer does the work and the superagent helps the developer, so the superagent works in the developer's name: its notes on the issue, its commits and its pushes carry the developer's identity. The Source still tells the agent's notes and the panel's notes from a person's by markers, so the developer's own notes on an issue reach the agent as human input even though the account is shared.
 
 The Redmine and Gerrit Sources are inserted disabled, as Feishu is; enable them in the profile's `cordis.patch.yml`:
 
@@ -45,7 +67,7 @@ Both Sources are configured under *Settings* → *Sources*.
 | --- | --- |
 | Address | `http://redmine.example.com`, without a trailing slash |
 | API key | The REST web services key of the bound account; a credential, never in the agent's environment |
-| Login | The bound account's login; empty uses the account of the API key |
+| Login | The bound account's login, here `dev`; empty uses the account of the API key |
 | Project | An optional project filter; empty reads every project the account sees, which is the usual setting here |
 | Receive new issues | Whether an issue that does not mention the agent is received at all |
 | Receive discussion | Whether a journal that does not mention the agent is received at all |
@@ -55,9 +77,9 @@ Both Sources are configured under *Settings* → *Sources*.
 | Field | Meaning |
 | --- | --- |
 | Address | `http://gerrit.example.com:8080`, the HTTP address of the review server |
-| SSH address | `ssh://agent@gerrit.example.com:29418`, without the project; the agent appends the repository the issue names |
+| SSH address | `ssh://dev@gerrit.example.com:29418`, without the project; the agent appends the repository the issue names |
 | Project | An optional single-repository override; empty, the recommended setting, tracks the issue-referencing patches of every repository |
-| Account | The user name on Gerrit; a change belongs to the agent when this account owns it |
+| Account | The user name on Gerrit, here `dev`; a change belongs to the agent when this account owns it |
 | HTTP password | The account's HTTP password, used to read review comments; a credential |
 | SSH private key | The path of the key whose public key is registered with the account |
 | Commit email | The email Gerrit accepts; commit as it when the ticket names no author |
@@ -87,9 +109,16 @@ The prepare command is optional. Without one, the Ticket's directory stays empty
 
 ## The Policy
 
-Under *Settings* → *Policy* → *Eval → On each Source*, the Redmine Source lists the people whose issues and journals may start work — in the company, the project managers — and the Gerrit Source lists the people whose review comments may.
+Under *Settings* → *Policy* → *Eval → On each Source*, the Redmine Source lists the people whose issues and journals may start work, and the Gerrit Source lists the people whose review comments may. In this company both lists name the leader:
 
-Redmine's API reports the **display name** of an author beside its id, and no login, so the Redmine list holds the names Redmine shows (`Li Na`). The Gerrit list holds the user names of Gerrit (`bob`), which is what its API reports.
+| Source | The allowed entry | What it allows |
+| --- | --- | --- |
+| Redmine | `Wang Lei`, the display name Redmine shows | the issues and the journals of the leader start the work |
+| Gerrit | `lead`, the user name Gerrit reports | the review comments of the leader start the follow-up work |
+
+Redmine's API reports the **display name** of an author beside its id, and no login, so the Redmine list holds the names Redmine shows. The Gerrit list holds the user names of Gerrit, which is what its API reports.
+
+The leader is on the list and the developer is not, because the leader assigns the work and merges the patches. The developer does the work, and the superagent helps the developer; a request of the developer starts no new work, it is input on the ticket the superagent already works.
 
 A Redmine request addresses the agent when the issue is assigned to the bound account, or when the text holds `@<login>`. A Gerrit request addresses it when the review comment holds `@<account>`. Both are the conventions those systems have, not mentions of their own.
 
@@ -140,11 +169,15 @@ The host binds that change to the Ticket, so the review comments on it reach the
 | The push fails with `Too many authentication failures` | The worker offers the keys of the SSH agent before the configured one. dsh-superagent writes `-o IdentitiesOnly=yes`, so the configured key is the only one offered |
 | The change is not bound to the Ticket | Its commit message names no issue and its topic does not carry the ticket's name. Add the `Issue:` trailer with the Redmine issue number, or push under the ticket's topic; a configured Gerrit project also hides the repository if it names another one |
 | The review comments do not reach the worker | The comments are on a change whose commit message names no issue, or the author is not on the Gerrit list. Both must hold |
+| The developer may not merge the patch | Gerrit asks for a review by somebody else: the author of a change may not submit it. The leader reviews the change, gives it Code-Review +2 and merges it |
 | The push is refused with `same Change-Id in multiple changes` | The branch carries a second commit with the same `Change-Id`. Amend the commit instead of adding one |
 | The worker's git asks for a host key | dsh-superagent writes `core.sshCommand` with `StrictHostKeyChecking=no`; a worker that pushes outside its Ticket directory does not use it |
+| The sign-in page does not open a system | The role has no account yet, or the stack is not up. `env/accounts.sh` provisions the roles of the company, and `env/README.md` lists the addresses |
 
 ## The local environment
 
-`env/` holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are assigned to the bound account, while a project manager account can assign more. See `env/README.md` for every address, account, API key and SSH key of that stack.
+`env/` holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13 behind an nginx proxy, and a sign-in page on `http://localhost:3001/` that opens either system with one click per role. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are written by the leader and assigned to the developer.
+
+`env/accounts.sh` provisions the three roles on a running stack, and `env/seed.sh` calls it before it seeds the projects and the issues. `env/verify.sh` checks the roles and with them the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it. See `env/README.md` for every address, account, API key and SSH key of that stack, and `env/.env` for the credentials themselves.
 
 `scripts/live/redmine.ts` and `scripts/live/gerrit.ts` check the two Sources against a running Redmine and Gerrit: they list the changed issues and the open changes, read one with its journals and its comments, post a note and a review message, and run a poll round that must turn an issue, a journal and a review comment into Triggers. Run them with `npx vite-node scripts/live/redmine.ts` and the addresses and credentials of the environment as `REDMINE_URL`, `REDMINE_KEY`, `REDMINE_LOGIN`, `REDMINE_NAME`, `REDMINE_ID`, `REDMINE_PROJECT`, `GERRIT_URL`, `GERRIT_USER`, `GERRIT_PASS`, `GERRIT_PROJECT` and `GERRIT_BRANCH`.

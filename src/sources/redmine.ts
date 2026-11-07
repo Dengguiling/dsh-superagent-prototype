@@ -38,7 +38,7 @@ export const redmineKind: SourceKind<RedmineConfig> = {
     { key: 'apiKey', type: 'text', label: { zh: 'API 密钥', en: 'API key' },
       hint: { zh: '智能体账号在 Redmine 的“我的账号”里的 API 访问密钥；这是凭据，不会进入智能体的运行环境。',
         en: 'The REST web services key of the agent account in Redmine; it is a credential and never reaches the agent environment.' } },
-    { key: 'login', type: 'text', label: { zh: '智能体的 Redmine 账号', en: 'Agent Redmine login' },
+    { key: 'login', type: 'text', label: { zh: '绑定的 Redmine 账号', en: 'The bound Redmine account' },
       hint: { zh: '留空时用 API 密钥对应的账号。事务指派给它或 @ 它时，视为对它说话。',
         en: 'Empty uses the account of the API key. An issue assigned to it or mentioning it addresses the agent.' } },
     { key: 'project', type: 'text', label: { zh: '监听的项目', en: 'Watched project' },
@@ -90,7 +90,7 @@ export const redmineKind: SourceKind<RedmineConfig> = {
       { key: 'DSH_SUPERAGENT_REDMINE_PROJECT', description: { zh: '接下工单的事务所在的项目。', en: 'The project of the issue that started the ticket.' } },
       { key: 'DSH_SUPERAGENT_REDMINE_ISSUE_ID', description: { zh: '接下工单的事务编号。', en: 'The number of the issue that started the ticket.' } },
       { key: 'DSH_SUPERAGENT_REDMINE_ISSUE_URL', description: { zh: '接下工单的事务页面地址。', en: 'The page of the issue that started the ticket.' } },
-      { key: 'DSH_SUPERAGENT_REDMINE_LOGIN', description: { zh: '智能体的 Redmine 账号；@ 它或把事务指派给它，就视为对它说话。', en: 'The agent\'s Redmine login; mentioning it addresses the agent.' } },
+      { key: 'DSH_SUPERAGENT_REDMINE_LOGIN', description: { zh: '绑定的 Redmine 账号；@ 它或把事务指派给它，就视为对它说话。', en: 'The bound Redmine account; mentioning it addresses the agent.' } },
     ],
     values: ({ deployment, config, trigger }) => {
       const base = deployment.redmine?.baseUrl ?? config.baseUrl

@@ -31,13 +31,14 @@ docker compose ps         # wait until redmine/gerrit report "healthy"
 
 * the `redmine-init` service loads the Redmine default configuration data
   (trackers, statuses, priorities, roles), enables *Administration ▸ Settings ▸
-  Authentication ▸ REST web services*, pins the API keys of the `admin` and the
-  `dev` account, and gives the administrator the display name of the project
-  manager,
+  Authentication ▸ REST web services*, creates the three accounts of the
+  company (`admin`, `lead`, `dev`) with their display names, and pins their
+  API keys,
 * the `gerrit` service bootstraps its own site on the first start (see
-  `gerrit/start.sh`): it creates the `agent` account, registers the SSH public
-  keys, sets the HTTP passwords and switches Gerrit to
-  `[auth] type = HTTP`.
+  `gerrit/start.sh`): it creates the `dev` account, registers the SSH public
+  keys, signs the `lead` account in (the only flow that gives an account the
+  external id the HTTP mode looks it up by), sets the HTTP passwords and
+  switches Gerrit to `[auth] type = HTTP`.
 
 Both initialisations are idempotent — restarting the stack keeps them.
 
@@ -66,7 +67,7 @@ docker compose down -v       # stop and remove everything, including the data
 | Redmine REST API         | `http://localhost:3000/projects.json`  | `http://redmine:3000/projects.json` |
 | Gerrit UI + REST API     | `http://localhost:8080`                | `http://proxy:8080`        |
 | Gerrit REST API          | `http://localhost:8080/a/...`          | `http://gerrit:8080/a/...` |
-| Gerrit SSH (git)         | `ssh://agent@localhost:29418/demo`     | `ssh://agent@gerrit:29418/demo` |
+| Gerrit SSH (git)         | `ssh://dev@localhost:29418/demo`       | `ssh://dev@gerrit:29418/demo` |
 | PostgreSQL               | –                                      | `postgres://redmine:redmine@pg:5432/redmine` |
 | the sign-in page         | `http://localhost:3001`                 | `http://signin:3000`       |
 
@@ -98,8 +99,8 @@ The proxy asks for the credentials itself and keeps two password files, which
 
 | path              | accounts          | serves            |
 |-------------------|-------------------|-------------------|
-| `/etc/nginx/htpasswd.ui`  | `alice`   | the web UI        |
-| `/etc/nginx/htpasswd.api` | `alice`, `agent`, `admin` | the REST API `/a/` |
+| `/etc/nginx/htpasswd.ui`  | `lead`    | the web UI        |
+| `/etc/nginx/htpasswd.api` | `lead`, `dev`, `admin` | the REST API `/a/` |
 
 Gerrit checks the password of the account again on every request of its REST
 API, so the password files of the front end only decide **who may talk to
@@ -107,7 +108,7 @@ which part** of the review server. The split matters for the browser: the
 accounts that were created over the REST API carry no `gerrit:<login>` external
 id, so Gerrit refuses them with "name already in use" — a dead end, because the
 browser keeps the refused credential and sends it again, and a *403* never asks
-for the credentials again. The front end therefore accepts only `alice` on the
+for the credentials again. The front end therefore accepts only `lead` on the
 web UI: a browser that holds any other credential gets the challenge again and
 can sign in.
 
@@ -165,13 +166,14 @@ All values live in [`.env`](.env) and are consumed by `docker-compose.yml`,
 
 ### Redmine
 
-Two people, and no account of the agent's own: **the superagent binds to the
+Three roles, and no account of the agent's own: **the superagent binds to the
 account of the developer** (`dev`), and recognizes the issues assigned to it.
 
-| account | login   | name    | role                     | password   | API key |
-|---------|---------|---------|--------------------------|------------|---------|
-| admin   | `admin` | Li Na   | the project manager (PM) | `admin12345` | `a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4` |
-| dev     | `dev`   | Zhang Wei | the developer ("you"), the bound account | `agent12345` | `0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c` |
+| account | login   | name       | role                                    | password   | API key |
+|---------|---------|------------|-----------------------------------------|------------|---------|
+| admin   | `admin` | System Administrator | the system manager: the highest rights, out of the tests | `admin12345` | `a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4` |
+| lead    | `lead`  | Wang Lei   | the leader: assigns the work to the developer | `lead12345` | `1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d` |
+| dev     | `dev`   | Zhang Wei  | the developer ("you"), the bound account | `agent12345` | `0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c` |
 
 Older revisions of this environment created the developer's account as
 `agent`; `redmine/init.rb` renames it once, keeping its user id and its API key.
@@ -192,15 +194,16 @@ curl -u "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4:x" \
 | account | login   | e-mail               | HTTP password | used for |
 |---------|---------|----------------------|---------------|----------|
 | admin   | `admin` | `admin@example.com`  | `admin12345`  | the bootstrap and the scripts of `verify.sh` |
-| agent   | `agent` | `agent@example.com`  | `agent12345`  | the agent: the REST API, the SSH push, its commits |
-| alice   | `alice` | `alice@example.com`  | `alice12345`  | **the web UI**: the person who reviews the changes |
+| dev     | `dev`   | `dev@example.com`    | `dev12345`    | the developer: the SSH push of the patches, the commits |
+| lead    | `lead`  | `lead@example.com`   | `lead12345`   | **the web UI**: the leader reviews and merges the changes |
 
 ```bash
 curl -u admin:admin12345 http://localhost:8080/a/projects/
-curl -u agent:agent12345 http://localhost:8080/a/accounts/self
+curl -u dev:dev12345 http://localhost:8080/a/accounts/self
 ```
 
-Open <http://localhost:8080/> and sign in as **`alice` / `alice12345`**.
+Open <http://localhost:8080/> and sign in as **`lead` / `lead12345`** — or let
+the [sign-in page](#2a-the-sign-in-page) do it for you.
 
 > **The browser remembers the credential.** Chrome and Firefox keep the answer to
 > a Basic challenge and send it again on every later request, without asking.
@@ -226,22 +229,22 @@ Open <http://localhost:8080/> and sign in as **`alice` / `alice12345`**.
 > rights. The built-in `admin` of the bootstrap keeps its name and cannot be
 > used in the browser.
 
-### SSH keys of the agent account
+### SSH keys of the developer account
 
 | file (on the host)                     | type                    | notes |
 |---------------------------------------|-------------------------|-------|
 | `env/keys/agent_id_ecdsa`              | ECDSA nistp256          | **default key**, works with every current SSH client |
-| `env/keys/agent_id_ecdsa.pub`          |                         | registered for the `agent` account |
+| `env/keys/agent_id_ecdsa.pub`          |                         | registered for the `dev` account |
 | `env/keys/agent_id_rsa`                | RSA 3072                | alternative, registered as well; needs the option below |
 | `env/keys/agent_id_rsa.pub`            |                         | |
 
-Both public keys are registered for the `agent` account through the Gerrit
-REST API (`POST /a/accounts/agent/sshkeys`, the key is sent as raw body).
+Both public keys are registered for the `dev` account through the Gerrit
+REST API (`POST /a/accounts/dev/sshkeys`, the key is sent as raw body).
 
 ```bash
 export GIT_SSH_COMMAND="ssh -i $PWD/keys/agent_id_ecdsa -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-git clone ssh://agent@localhost:29418/demo
+git clone ssh://dev@localhost:29418/demo
 git push origin HEAD:refs/for/main
 ```
 
@@ -261,10 +264,12 @@ git push origin HEAD:refs/for/main
 
 ## 4. Seeded data
 
-The story of the environment: the PM assigns concrete defects in the company's
-SDK to the developer, the superagent takes the issues assigned to that
-developer, fixes them in the repository the issue names, and pushes a patch
-for review.
+The story of the environment: the leader assigns concrete defects in the
+company's SDK to the developer, the superagent takes the issues assigned to
+that developer, fixes them in the repository the issue names, and pushes a
+patch for review.  The leader then reviews the patch and merges it — in Gerrit
+the author of a change may not merge it, so the merge is really the leader's
+job.
 
 ### Redmine
 
@@ -296,14 +301,14 @@ curl -H "X-Redmine-API-Key: $REDMINE_ADMIN_API_KEY" \
 
 | project | branch  | push URL | change URL |
 |---------|---------|----------|------------|
-| `sdk` | `main` (HEAD points at `refs/heads/main`) | `ssh://agent@localhost:29418/sdk` | `http://localhost:8080/#/c/sdk/+/<change-number>` |
-| `sdk-cli` | `main` | `ssh://agent@localhost:29418/sdk-cli` | `http://localhost:8080/#/c/sdk-cli/+/<change-number>` |
-| `demo` | `main` | `ssh://agent@localhost:29418/demo` | kept for compatibility |
+| `sdk` | `main` (HEAD points at `refs/heads/main`) | `ssh://dev@localhost:29418/sdk` | `http://localhost:8080/#/c/sdk/+/<change-number>` |
+| `sdk-cli` | `main` | `ssh://dev@localhost:29418/sdk-cli` | `http://localhost:8080/#/c/sdk-cli/+/<change-number>` |
+| `demo` | `main` | `ssh://dev@localhost:29418/demo` | kept for compatibility |
 
 The `sdk` project holds a small Python SDK (`demo_sdk`: client, pagination,
 retry, auth) with a pytest suite, the `sdk-cli` project a command line front
 end of it. Both carry the defect of their issue in the seeded snapshot, so the
-agent has something real to fix:
+developer has something real to fix:
 `demo_sdk/pagination.py` rounds the page count down and drops the last
 partial page, and `sdk_cli/main.py` does not forward the parsed `--timeout` to
 the API client.
@@ -317,12 +322,13 @@ the API client.
 Idempotent. It
 
 1. creates the Redmine projects `sdk` and `sdk-cli` (if missing),
-2. adds the `dev` account as a Developer member and the PM as its Manager,
-3. creates the defect issues, authored by the PM and assigned to `dev`, plus
-   the negative case assigned to the PM (skipping the ones that already exist),
+2. adds the `dev` account as a Developer member and the leader as its Manager,
+3. creates the defect issues, authored by the leader and assigned to `dev`,
+   plus the negative case assigned to the leader (skipping the ones that
+   already exist),
 4. closes the issues of the old `demo` project,
-5. creates the Gerrit projects `sdk` and `sdk-cli`, makes the agent an
-   administrator,
+5. creates the Gerrit projects `sdk` and `sdk-cli`, makes the developer an
+   administrator of the review server,
 6. clones each project over SSH and pushes the initial commit to
    `refs/heads/main` (skipped when the branch already exists),
 7. points the project HEAD at `refs/heads/main`.
@@ -345,10 +351,10 @@ It proves:
 * the `updated_on=><ISO8601>` filter of `GET /issues.json` works,
 * `GET /a/projects/` (basic auth) lists the Gerrit project and the responses
   carry the `)]}'` prefix,
-* `git push origin HEAD:refs/for/main` (as `agent`, over SSH) creates a change
+* `git push origin HEAD:refs/for/main` (as `dev`, over SSH) creates a change
   in `sdk` and in `sdk-cli`,
 * the new change is readable through `GET /a/changes/<n>/detail` (with the
-  `)]}'` prefix, status `NEW`), belongs to the agent, is in the right project
+  `)]}'` prefix, status `NEW`), belongs to the developer, is in the right project
   and keeps its `Issue: #<id>` trailer, and is listed by
   `GET /a/changes/?q=project:sdk+status:open`.
 
@@ -472,7 +478,7 @@ env/
 ├── scripts/
 │   └── common.sh            # shared helpers of seed.sh / verify.sh
 └── keys/
-    ├── agent_id_ecdsa(.pub) # agent ssh key (default)
+    ├── agent_id_ecdsa(.pub) # the ssh key of the developer (default)
     ├── nginx.conf          # the front end of the review server
-    └── agent_id_rsa(.pub)   # agent ssh key (alternative, needs +ssh-rsa)
+    └── agent_id_rsa(.pub)   # the ssh key of the developer (alternative, needs +ssh-rsa)
 ```

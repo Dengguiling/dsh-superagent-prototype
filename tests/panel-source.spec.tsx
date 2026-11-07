@@ -98,17 +98,17 @@ it('saves the Redmine account the agent acts as, and the fields of its own card'
   await click(tab(zh['tab.settings']))
   const redmine = all('.dt-card')[1]!
   const labels = () => [...redmine.querySelectorAll('label')].map(label => label.textContent)
-  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '智能体的 Redmine 账号', '监听的项目'])
+  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '绑定的 Redmine 账号', '监听的项目'])
   expect(field<HTMLInputElement>('Redmine 地址').value).toBe('http://redmine.test')
   await click([...redmine.querySelectorAll<HTMLElement>('[data-disclosure-row]')].find(row => row.textContent?.includes('高级'))!)
-  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '智能体的 Redmine 账号', '监听的项目', '轮询间隔 / 秒', '连续失败几次后报告异常'])
+  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '绑定的 Redmine 账号', '监听的项目', '轮询间隔 / 秒', '连续失败几次后报告异常'])
   expect(all('.dt-card')[0]!.textContent).toContain('当前机器人 Widgets Bot')
-  await type(field<HTMLInputElement>('智能体的 Redmine 账号'), 'agent-bot')
+  await type(field<HTMLInputElement>('绑定的 Redmine 账号'), 'agent-bot')
   // The account is read by setup, so the bar warns that saving restarts dsh-superagent and interrupts running work.
   expect(redmine.textContent).toContain('保存会重启 dsh-superagent：2 个进行中的派工会中断，并带恢复说明重新开始。')
   await act(async () => { redmine.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle()
   expect(server.settings.sources.redmine!.config).toMatchObject({ login: 'agent-bot' })
-  expect(field<HTMLInputElement>('智能体的 Redmine 账号').value).toBe('agent-bot')
+  expect(field<HTMLInputElement>('绑定的 Redmine 账号').value).toBe('agent-bot')
 })
 
 it('keeps a saved account on screen while dsh-superagent restarts', async () => {
