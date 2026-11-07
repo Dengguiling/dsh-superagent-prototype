@@ -32,7 +32,7 @@ export function threadDetail(host: ViewHost, key: string, before: string | undef
   if (!thread) return undefined
   const view = snapshot(host)
   const target = around ? store.triggers.get(around) : undefined
-  // Cursors pair timestamp and id so triggers sharing the same second (e.g., GitHub timestamps) page deterministically.
+  // Cursors pair timestamp and id so triggers sharing the same second (such as the whole seconds of a task system) page deterministically.
   const [at = '', id = ''] = before?.split('|') ?? []
   const triggers = target ? store.read.threadTriggers(key, limit + 1, target, true)
     : store.read.threadTriggers(key, limit + 1, before ? { at, id } : undefined)

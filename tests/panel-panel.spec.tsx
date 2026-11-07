@@ -8,8 +8,8 @@ import { server, found } from './fixtures/panel-server.ts'
 
 usePanel()
 it('states why a filtered search result has no Thread instead of opening an empty one', async () => {
-  server.search = { items: [found('e9', '2026-09-20T00:00:00Z', { source: 'github', actor: { source: 'github', id: 'someone' },
-    preview: 'issue text', threads: ['github:7'],
+  server.search = { items: [found('e9', '2026-09-20T00:00:00Z', { source: 'redmine', actor: { source: 'redmine', id: 'someone' },
+    preview: 'issue text', threads: ['redmine:7'],
     filtered: 'source_disabled' })], threads: [] }
   await mount()
   await type(field<HTMLInputElement>(zh.searchLabel), 'issue')
@@ -45,7 +45,7 @@ it('returns to the exact page after a remount of the main panel', async () => {
 
 it('shows domain terms in the interface language only and lists both languages in the (?) glossary', async () => {
   await mount(en)
-  expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['Overview', 'Source', 'Trigger', 'Eval', 'Execution', 'Settings'])
+  expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['Overview', 'Workbench', 'Source', 'Trigger', 'Eval', 'Execution', 'Settings'])
   await click('Glossary')
   const dialog = document.querySelector('[role="dialog"]')!
   const row = [...dialog.querySelectorAll('tr')].find(item => item.textContent?.startsWith('Ticket'))!

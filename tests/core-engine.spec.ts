@@ -1362,7 +1362,7 @@ describe('final review: close times', () => {
     h.engine.bindThread(ticketId, { source: 'gh', id: 'pr-1' }, true)
     h.tick(30)
     const before = h.repo.tickets.get(ticketId)!.updatedAt
-    // GitHub gives whole seconds, and the PR merged before the ticket's last change.
+    // The task system gives whole seconds, and the change merged before the ticket's last change.
     h.engine.threadClosed({ source: 'gh', id: 'pr-1' }, 'merged', '2026-09-23T00:00:05Z')
     const ended = h.repo.tickets.get(ticketId)!
     expect(ended.ended).toMatchObject({ at: '2026-09-23T00:00:05.000Z', outcome: 'merged' })

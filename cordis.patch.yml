@@ -4,12 +4,16 @@
 - insert:
     - id: dsh-superagent
       name: dsh-superagent
-    - id: dsh-superagent-github
-      name: dsh-superagent/github-watch
     # Optional Feishu Source; requires configuring a bot CLI after enabling.
     - id: dsh-superagent-feishu
       name: dsh-superagent/feishu-watch
       disabled: true
+    # The task system of a corporate installation: Redmine issues are the work. Configure its API key.
+    - id: dsh-superagent-redmine
+      name: dsh-superagent/redmine-watch
+    # The code review server: the agent's patches are submitted here. Configure its account and SSH key.
+    - id: dsh-superagent-gerrit
+      name: dsh-superagent/gerrit-watch
     # The agent preset of every Executor Session (WORKER_PRESET in src/app/sessions.ts); the main Session has its own, below.
     # It is DSH's `standard` preset with only what a worker needs, and a shell whose foreground command moves to a background job
     # after 5 seconds, so a long command does not hold back a person's message, which the Session takes at its next step. Left

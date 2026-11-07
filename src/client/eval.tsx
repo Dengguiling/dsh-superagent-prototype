@@ -29,7 +29,9 @@ export function EvalStatus({ filter, window, paused }: { filter: DecisionFilter;
       {DECISION_FILTERS.map(key => <Pill key={key} active={filter === key} onClick={() => { setLimit(30); show(key, !!window) }}>
         {t(`decisionFilter.${key}`)}
       </Pill>)}
-      {window && <><span className="dt-filter-gap" /><Pill active onClick={() => show(filter, false)}>{t('lastDayOnly')}</Pill></>}
+      {/* The window of the Decision log is the operator's choice: the last day, or every Decision kept. */}
+      <span className="dt-filter-gap" />
+      <Pill active={window === '24h'} onClick={() => { setLimit(30); show(filter, window !== '24h') }}>{t('lastDayOnly')}</Pill>
     </div>
     <LoadState error={error} loading={!data} />
     {data && (data.items.length ? <ul className="dt-list">{data.items.map(decision => <DecisionLine key={decision.id}

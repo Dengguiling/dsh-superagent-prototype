@@ -6,35 +6,29 @@ import { mainAdmissionPolicy } from '../src/app/context.ts'
 import { Engine, MemoryRepositories, type Executor, type Policy, type Trigger } from '../src/core/index.ts'
 import type { Commands } from '../src/infra/commands.ts'
 import { SettingsSchema } from '../src/policy.ts'
-import { testDeployment } from './fixtures/deployment.ts'
+import { testDeployment, testRedmine } from './fixtures/deployment.ts'
 import { deferred } from './fixtures/async.ts'
-import { githubKind } from '../src/sources/github.ts'
+import { redmineKind } from '../src/sources/redmine.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 
-/** Assessor fixture backed by in-memory repositories and fake GitHub Issue and file reads. */
+/** Assessor fixture backed by in-memory repositories and fake Redmine issue reads. */
 function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.from({ length: 5 }, (_, i) => `comment ${i}`),
   threadContext?: AssessorHost['threadContext']) {
-  const comments = bodies.map((body, i) => ({ id: i, html_url: `https://github.com/acme/widgets/issues/1#c${i}`,
-    user: { login: 'bob' }, created_at: '2026-09-09T00:00:00Z', body }))
+  const journals = bodies.map((body, i) => ({ id: 10 + i, notes: body, user: { id: 2, name: 'bob' }, created_on: '2026-09-09T00:00:00Z' }))
   const gate = { issue: undefined as Promise<void> | undefined }
   const commands = {
-    repository: 'acme/widgets', deployment: testDeployment(),
+    deployment: testDeployment({ redmine: testRedmine }), redmine: testRedmine,
     withSignal() { return commands },
-    gh: vi.fn(async (args: string[]) => {
+    http: vi.fn(async () => {
       await gate.issue
-      const number = Number(/issues\/(\d+)/.exec(args[1]!)?.[1])
-      return args[1]!.includes('/comments') ? comments : { id: 100 + number, number, state: 'open',
-        html_url: `https://github.com/acme/widgets/issues/${number}`,
-        user: { login: 'bob' }, created_at: '2026-09-09T00:00:00Z', title: 'Issue', body: 'body' }
+      return { status: 200, body: JSON.stringify({ issue: { id: 1, subject: 'Issue', description: 'body',
+        created_on: '2026-09-09T00:00:00Z', updated_on: '2026-09-09T00:00:00Z', author: { id: 2, name: 'bob' }, journals } }) }
     }),
     run: vi.fn(async () => 'export const value = 1\n'),
-    // A string first argument is a raw file path; otherwise validate the fake gh response against the schema.
-    api: vi.fn(async (schema: unknown, ...rest: string[]) => typeof schema === 'string' ? 'export const value = 1\n'
-      : (schema as { parse(value: unknown): unknown }).parse(await (commands as unknown as { gh(args: string[]): Promise<unknown> }).gh(['api', rest[0]!]))),
   } as unknown as Commands
   const repo = new MemoryRepositories()
   const sources = new SourceRegistry(() => SettingsSchema.parse({}))
-  sources.register(githubKind)
+  sources.register(redmineKind)
   let engine!: Engine
   const host: AssessorHost = {
     get engine() { return engine }, commands, deployment: testDeployment(), settings: () => SettingsSchema.parse({}),
@@ -59,8 +53,8 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   const size = () => kept.evals.size
   return { repo, engine, assessor, tools, size, gate }
 }
-const issue = (n: number): Trigger => ({ id: `issue-${n}`, source: 'github', threads: [{ source: 'github', id: String(n) }], actor: { source: 'github', id: 'bob' }, human: true,
-  at: new Date(Date.UTC(2026, 8, 9, 0, 0, n)).toISOString(), text: `issue ${n}`, url: `https://github.com/acme/widgets/issues/${n}`, meta: { number: n } })
+const issue = (n: number): Trigger => ({ id: `issue-${n}`, source: 'redmine', threads: [{ source: 'redmine', id: String(n) }], actor: { source: 'redmine', id: 'bob' }, human: true,
+  at: new Date(Date.UTC(2026, 8, 9, 0, 0, n)).toISOString(), text: `issue ${n}`, url: `http://redmine.test/issues/${n}`, meta: { issueId: n, kind: 'issue' } })
 const signal = new AbortController().signal
 
 it('keeps nothing for an Eval once it is decided, as for one that timed out', async () => {
@@ -68,14 +62,14 @@ it('keeps nothing for an Eval once it is decided, as for one that timed out', as
   for (let n = 1; n <= 3; n++) {
     s.engine.receive(issue(n)); s.engine.evaluateDue()
     await s.assessor.context(`issue-${n}`, signal)
-    await s.tools.orchestrator_eval_read!({ trigger_id: `issue-${n}`, resource: 'file', path: 'src/value.ts', offset: 0 }, signal)
+    await s.tools.orchestrator_eval_read!({ trigger_id: `issue-${n}`, resource: 'thread', offset: 0 }, signal)
     expect(s.size()).toBeGreaterThan(0)
     s.engine.decide(`issue-${n}`, { kind: 'ignore', reason: 'not a request' })
     expect(s.size()).toBe(0)
   }
   s.engine.receive(issue(9)); s.engine.evaluateDue()
   await s.assessor.context('issue-9', signal)
-  const thread = s.repo.threads.get('github:9')!
+  const thread = s.repo.threads.get('redmine:9')!
   s.repo.threads.save({ ...thread, expired: 2, evaluating: { ...thread.evaluating!, delivered: '2000-01-01T00:00:00.000Z', deadline: '2000-01-01T00:00:00.000Z' } })
   s.engine.evaluateDue()
   expect(s.size()).toBe(0)
@@ -136,24 +130,24 @@ it('loads a window without the assessment instructions: the trigger once, cut me
   const bodies = Array.from({ length: 30 }, (_, i) => `comment ${i}: ${'the label reads oddly on the settings page. '.repeat(i % 4 === 0
     ? 40 : 3)}`)
   const s = setup('inferred', bodies)
-  const trigger = { ...issue(1), id: 'c15', text: bodies[15]!, url: 'https://github.com/acme/widgets/issues/1#c15', meta: { number: 1,
-    kind: 'comment' } }
+  const trigger = { ...issue(1), id: 'c15', text: bodies[15]!, url: 'http://redmine.test/issues/1#change-25', meta: { issueId: 1,
+    journalId: 25, kind: 'journal' } }
   s.engine.receive(trigger); s.engine.evaluateDue()
   const result = await s.assessor.context('c15', signal) as Record<string, unknown> & { thread: { messages: Record<string, unknown>[] } }
   expect(result).not.toHaveProperty('instructions')
   expect(result.text).toBe(bodies[15])
   const messages = new Map(result.thread.messages.map(message => [message.id as string, message]))
-  const at = (i: number) => messages.get(`https://github.com/acme/widgets/issues/1#c${i}`)!
+  const at = (i: number) => messages.get(String(10 + i))!
   // The trigger's own text is given once at top level; its two nearest neighbours keep more text than the rest of the window.
   expect(at(15)).toEqual({ id: expect.any(String), from: 'bob', at: expect.any(String), trigger: true })
-  expect(at(16)).toMatchObject({ chars: bodies[16]!.length, text: `${bodies[16]!.slice(0, 1200)}…` })
-  expect(at(12)).toMatchObject({ chars: bodies[12]!.length, text: `${bodies[12]!.slice(0, 400)}…` })
-  expect(at(14)).toMatchObject({ text: bodies[14] })
+  expect(at(16)).toMatchObject({ chars: bodies[16]!.trim().length, text: `${bodies[16]!.trim().slice(0, 1200)}…` })
+  expect(at(12)).toMatchObject({ chars: bodies[12]!.trim().length, text: `${bodies[12]!.trim().slice(0, 400)}…` })
+  expect(at(14)).toMatchObject({ text: bodies[14]!.trim() })
   expect(at(14)).not.toHaveProperty('chars')
   // Messages outside the window are stubs that orchestrator_eval_read can read in full.
-  expect(at(8)).toEqual({ id: expect.any(String), from: 'bob', preview: bodies[8]!.slice(0, 50) })
+  expect(at(8)).toEqual({ id: expect.any(String), from: 'bob', preview: bodies[8]!.trim().slice(0, 50) })
   const whole = await s.tools.orchestrator_eval_read!({ trigger_id: 'c15', resource: 'message', message_id: at(8).id }, signal)
-  expect(JSON.stringify(whole)).toContain(bodies[8]!.slice(-40))
+  expect(JSON.stringify(whole)).toContain(bodies[8]!.trim().slice(-40))
   expect(JSON.stringify(result).length).toBeLessThan(9000)
 })
 

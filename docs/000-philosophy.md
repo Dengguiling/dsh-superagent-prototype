@@ -16,18 +16,18 @@ Every part of the project is judged by the attention it costs. A message, a noti
 
 ## What follows for the design
 
-- **Few concepts.** The design has only its domain concepts, such as a Source, and their concrete implementations, such as GitHub and Feishu. A business need becomes an attribute of one of them, or a prompt the agent follows. The design does not add a concept for it.
+- **Few concepts.** The design has only its domain concepts, such as a Source, and their concrete implementations, such as Redmine and Gerrit. A business need becomes an attribute of one of them, or a prompt the agent follows. The design does not add a concept for it.
 - **Few settings.** A default replaces a setting when one value suits almost every team. Behaviour that a team describes in words is prompt text, not a setting.
 - **A panel that shows only what needs a person.** It lists first what waits for a person. A healthy state takes no space.
 - **Documents read in order.** Each numbered document builds only on the ones before it, so a reader never needs a concept that has not been introduced yet.
 
 ## Responsibility
 
-The agent comments, opens pull requests and messages people under accounts your team sees every day. Every message it sends costs your colleagues' attention, and you are responsible for it. The more the agent can do, the more care its operator owes the team:
+The agent writes notes on issues, submits patches for review and messages people under accounts your team sees every day. Every message it sends costs your colleagues' attention, and you are responsible for it. The more the agent can do, the more care its operator owes the team:
 
 - **Start narrow.** Begin with a short allowed list and with proactive work only recorded. Widen both once what the agent would have done looks right.
 - **Tune for less noise.** When the agent is noisy, make its prompts shorter and stricter, or pause it. Do not add more messages to explain the noise.
-- **Do not use it to produce volume.** Mass pull requests, broadcast messages and busywork cost the team more than they give.
+- **Do not use it to produce volume.** Mass patches, broadcast messages and busywork cost the team more than they give.
 - **Own what it says.** Read what the agent posts in your name, and correct it in the prompts when it is wrong.
 
 The goal is the right help at the right time, and nothing at any other time.

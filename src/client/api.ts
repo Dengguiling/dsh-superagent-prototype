@@ -133,6 +133,10 @@ export type DroppedReply = SourceStatusRow['dropped'][number]
 export type SearchView = ApiResponse<'GET search'>
 export type TicketSummary = SearchView['tickets'][number]
 export type { TicketStage }
+export type PmsView = ApiResponse<'GET pms'>
+export type TaskRow = PmsView['tasks'][number]
+export type TaskDetailView = ApiResponse<'GET pms/:id'>
+export type TaskMessage = TaskDetailView['messages'][number]
 export type HistoryView = ApiResponse<'GET policy/history'>
 export type PromptsView = ApiResponse<'GET prompts'>
 export type PromptConfig = PromptsView['defaults']

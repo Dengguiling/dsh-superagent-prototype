@@ -17,7 +17,7 @@ The Source records whether a message addresses the agent: `mention` for a mentio
 
 ### Subscriptions: continuing existing work
 
-Every message on a subscribed Thread reaches its subscribed Tickets as context, including messages from bots and CI. This delivery bypasses the gate and grants no new authority. Each Ticket remains limited by its Mandate.
+Every message on a subscribed Thread reaches its subscribed Tickets as context, including messages from bots and machines. This delivery bypasses the gate and grants no new authority. Each Ticket remains limited by its Mandate.
 
 A person's message on a Ticket's own Thread belongs to that Ticket's Executor to decide. The same applies when the main Session attaches a message to a Ticket. While an Executor owns the message, it takes no Eval and gets no Decision. Each Executor either handles the request within its Ticket's scope or hands it back for routing elsewhere.
 
@@ -39,7 +39,7 @@ A person can send an owned follow-up to Eval from the panel. If the main Session
 
 ### Context-only subscriptions
 
-An Executor can follow a related Thread, such as another Issue or pull request, for context. Its messages reach the Ticket but grant no authority or follow-up strength. Human messages there do not resume an ended Ticket unless the main Session attaches a message from that Thread. Notes from the main Session about other work are also context only.
+An Executor can follow a related Thread, such as another issue or change, for context. Its messages reach the Ticket but grant no authority or follow-up strength. Human messages there do not resume an ended Ticket unless the main Session attaches a message from that Thread. Notes from the main Session about other work are also context only.
 
 Human messages that reach no Ticket, including Threads whose Tickets were stopped by a person, take the Eval path. Bot messages take that path independently of their delivery to subscribed Tickets.
 
@@ -58,7 +58,8 @@ For an unlisted person, an explicit admission cell takes precedence even on a Th
 Each Source's Policy has an admission table. Its rows are receiving scopes:
 
 - **Feishu:** each configured chat, other chats the bot receives mentions from, and direct messages. Other chats are received only when **其他群** is set to **仅 @** on the Feishu card.
-- **GitHub:** new Issues, new pull requests, comments and the default branch's CI.
+- **Redmine:** new issues, and the discussion under them.
+- **Gerrit:** review comments on the agent's changes, and the change messages that record a merge or an abandonment.
 
 A row has up to three cells. Each cell decides whether a message becomes an explicit request, an inferred candidate or nothing:
 
@@ -68,7 +69,7 @@ A row has up to three cells. Each cell decides whether a message becomes an expl
 | Not on the list, addressing the agent | explicit, inferred, ignore | ignore |
 | Not on the list, not addressing the agent | inferred, ignore | ignore |
 
-Cells for unaddressed messages are available only where the Source receives every message, such as a Feishu chat set to **全部消息** or a GitHub scope with its receive-all switch enabled. A CI result has no sender, so its row offers only the last cell. Bot messages use the bot list instead of these cells.
+Cells for unaddressed messages are available only where the Source receives every message, such as a Feishu chat set to **全部消息** or a Redmine or Gerrit scope with its receive-all switch enabled. A change message records a machine event and carries no request, so its row offers only the last cell. Bot messages use the bot list instead of these cells.
 
 Setting the unlisted-addressed cell to explicit lets anyone in that scope request work by mentioning the agent. This can be useful for a dedicated support chat. Inferred candidates still depend on the accept mode. Follow-ups normally bypass this table, except that an explicit cell still grants explicit strength.
 
@@ -76,7 +77,7 @@ The admission table is part of the Policy version. Weakening a cell does not imm
 
 ### Bots and automated reviewers
 
-The host recognizes GitHub Apps, logins ending in `[bot]`, and Feishu bots as bots. A Source can list bots such as `dependabot[bot]` whose messages may become inferred candidates. They must either address the agent or post in a scope that receives every message. They cannot make explicit requests or stop Tickets.
+The host recognizes logins ending in `[bot]`, Gerrit accounts that name themselves robots, and Feishu bots as bots. A Source can list bots such as `dependabot[bot]` whose messages may become inferred candidates. They must either address the agent or post in a scope that receives every message. They cannot make explicit requests or stop Tickets.
 
 An automated reviewer using an ordinary account counts as a person to the host. Its comments reach subscribed Tickets and generate follow-up notices. Team prompt text must identify such accounts as automated reviewers.
 
@@ -124,7 +125,7 @@ A condition on what the Executor may do with its own result, such as when it may
 
 ## Resume and stop
 
-An ended Ticket keeps its Mandate. A person's message on one of its own Threads can resume the same work without a new Eval or Decision, regardless of who sent it. Bots and CI do not wake ended Tickets. The Executor decides whether the request fits the scope and ends the round if it does not.
+An ended Ticket keeps its Mandate. A person's message on one of its own Threads can resume the same work without a new Eval or Decision, regardless of who sent it. Bots and machine messages do not wake ended Tickets. The Executor decides whether the request fits the scope and ends the round if it does not.
 
 Only three operations change a Mandate: accept creates it, a person's stop withdraws it, and failed revalidation revokes it. A Ticket stopped by a person stays ended and receives nothing more. Work requested there needs a new accept.
 

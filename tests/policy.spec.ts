@@ -4,7 +4,7 @@ import type { MandateBasis } from '../src/core/index.ts'
 import { migrateSettings } from '../src/app/migration.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
-import { githubKind } from '../src/sources/github.ts'
+import { redmineKind } from '../src/sources/redmine.ts'
 import type { Thread, Ticket, Trigger } from '../src/core/index.ts'
 
 const MEMBER = 'ou_alice'
@@ -12,20 +12,20 @@ const CHAT = 'oc_team'
 const OBSERVED = 'oc_1111111111111111111111111111'
 const feishuSource = (config: { chats: { chatId: string; listen: 'mentions' | 'all' }[]; directMessages: boolean }, enabled = true) => ({ enabled, config })
 const base = SettingsSchema.parse({
-  policy: { sources: { feishu: { allowed: [{ id: MEMBER, name: 'Alice' }], syncChat: CHAT }, github: { allowed: [{ id: 'Alice' }] } } },
+  policy: { sources: { feishu: { allowed: [{ id: MEMBER, name: 'Alice' }], syncChat: CHAT }, redmine: { allowed: [{ id: 'Alice' }] } } },
   eval: { mode: 'auto' },
   sources: { feishu: feishuSource({ chats: [{ chatId: CHAT, listen: 'mentions' }, { chatId: OBSERVED, listen: 'all' }], directMessages: true }) },
 })
 function setup(settings: Settings = base) {
   const sources = new SourceRegistry(() => settings)
-  sources.register(feishuKind); sources.register(githubKind)
+  sources.register(feishuKind); sources.register(redmineKind)
   return { sources, policy: settingsPolicy(settings, sources), version: policyVersion(settings) }
 }
 const { sources, policy } = setup()
 const thread = (subscriptions: string[] = []): Thread => ({ key: 'feishu:x', ref: { source: 'feishu', id: 'x' }, createdAt: '', subscriptions, correlated: [], pending: [], meta: {} })
 const feishu = (overrides: Partial<Trigger> & { meta?: Record<string, unknown> } = {}): Trigger => ({ id: 't', source: 'feishu', threads: [{ source: 'feishu', id: 'x' }], actor: { source: 'feishu', id: MEMBER }, human: true, at: '', text: 'hi', addressed: 'mention', meta: { chatId: CHAT, direct: false, mentioned: true }, ...overrides })
 const unaddressed = (overrides: Partial<Trigger> = {}): Trigger => { const { addressed: _addressed, ...rest } = feishu(overrides); return rest }
-const github = (login: string, addressed?: 'mention'): Trigger => ({ id: 'g', source: 'github', threads: [{ source: 'github', id: '1' }], actor: { source: 'github', id: login }, human: true, at: '', text: 'x', ...addressed ? { addressed } : {}, meta: { number: 1, isPr: true } })
+const redmine = (login: string, addressed?: 'mention'): Trigger => ({ id: 'g', source: 'redmine', threads: [{ source: 'redmine', id: '1' }], actor: { source: 'redmine', id: login }, human: true, at: '', text: 'x', ...addressed ? { addressed } : {}, meta: { issueId: 1, kind: 'issue' } })
 const ticket = { id: 'ticket', ended: { at: '', by: 'executor', reason: 'closed', outcome: 'closed' } } as Ticket
 
 describe('source scope', () => {
@@ -35,31 +35,31 @@ describe('source scope', () => {
     expect(sources.scope(feishu({ meta: { chatId: 'oc_other', direct: false, mentioned: true } }))).toEqual({ listened: false, reason: 'chat_not_allowed' })
     expect(sources.scope(feishu({ meta: { chatId: 'p2p', direct: true, mentioned: false } }))).toEqual({ listened: true, observed: false, row: 'direct' })
     expect(setup({ ...base, sources: { feishu: feishuSource({ chats: [], directMessages: false }) } }).sources.scope(feishu({ meta: { chatId: 'p2p', direct: true, mentioned: false } }))).toEqual({ listened: false, reason: 'direct_messages_not_allowed' })
-    expect(sources.scope(github('anyone'))).toEqual({ listened: true, observed: false })
+    expect(sources.scope(redmine('anyone'))).toEqual({ listened: true, observed: false, row: 'issue' })
   })
   it('listens to nothing from a configured Source whose plugin is not loaded, and keeps an invalid stored configuration disabled', () => {
     const bare = new SourceRegistry(() => base)
     expect(bare.scope(feishu())).toEqual({ listened: false, reason: 'source_not_installed' })
-    expect(bare.scope(github('anyone'))).toEqual({ listened: true, observed: false })
+    expect(bare.scope(redmine('anyone'))).toEqual({ listened: true, observed: false })
     const broken = new SourceRegistry(() => SettingsSchema.parse({ sources: { feishu: { enabled: true, config: { chats: 'oops' } } } }))
     broken.register(feishuKind)
     expect(broken.instance('feishu')).toMatchObject({ enabled: false })
     expect(broken.scope(feishu())).toEqual({ listened: false, reason: 'source_disabled' })
   })
   it('filters everything from a disabled Source', () => {
-    expect(setup({ ...base, sources: { ...base.sources, github: { enabled: false, config: {} } } }).sources.scope(github('anyone'))).toEqual({ listened: false, reason: 'source_disabled' })
+    expect(setup({ ...base, sources: { ...base.sources, redmine: { enabled: false, config: {} } } }).sources.scope(redmine('anyone'))).toEqual({ listened: false, reason: 'source_disabled' })
   })
 })
 describe('gate', () => {
   it('grants explicit strength when the sender is allowed in its Source\'s part and the Source marked the Trigger addressed', () => {
     expect(policy.gate(feishu(), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { via: 'addressed', source: 'feishu', sender: 'Alice', addressed: 'mention', scope: { chatId: CHAT } } })
     expect(policy.gate(feishu({ addressed: 'direct', meta: { chatId: 'p2p', direct: true, mentioned: false } }), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { addressed: 'direct' } })
-    // GitHub logins compare without case; the entry's id names the sender when it has no display name.
-    expect(policy.gate(github('alice', 'mention'), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { source: 'github', sender: 'Alice' } })
+    // Redmine account names compare without case; the entry's id names the sender when it has no display name.
+    expect(policy.gate(redmine('alice', 'mention'), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { source: 'redmine', sender: 'Alice' } })
   })
-  it('checks each Source\'s own list: a Feishu id allows nothing on GitHub', () => {
-    expect(policy.gate(github(MEMBER, 'mention'), thread(), [])).toEqual({ admissible: false, reason: 'not_a_member' })
-    expect(allowedSender(base, { source: 'github', id: 'ALICE' })).toEqual({ id: 'Alice' })
+  it('checks each Source\'s own list: a Feishu id allows nothing on Redmine', () => {
+    expect(policy.gate(redmine(MEMBER, 'mention'), thread(), [])).toEqual({ admissible: false, reason: 'not_a_member' })
+    expect(allowedSender(base, { source: 'redmine', id: 'ALICE' })).toEqual({ id: 'Alice' })
     expect(allowedSender(base, { source: 'feishu', id: 'Alice' })).toBeUndefined()
     expect(anyoneAllowed(base)).toBe(true)
     expect(anyoneAllowed(SettingsSchema.parse({}))).toBe(false)
@@ -68,7 +68,7 @@ describe('gate', () => {
     const quiet = { meta: { chatId: CHAT, direct: false, mentioned: false } }
     expect(policy.gate(unaddressed({ ...quiet, actor: { source: 'feishu', id: 'ou_guest' } }), thread(['ticket']), [])).toMatchObject({ admissible: true, strength: 'inferred', basis: { via: 'followup' } })
     expect(policy.gate(unaddressed(quiet), thread(['ticket']), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { via: 'followup', sender: 'Alice' } })
-    expect(policy.gate(github('someone'), thread(), [ticket])).toMatchObject({ admissible: true, strength: 'inferred' })
+    expect(policy.gate(redmine('someone'), thread(), [ticket])).toMatchObject({ admissible: true, strength: 'inferred' })
     // A Thread a ticket follows only for context lends no follow-up: the admission table decides, as on any Thread.
     const context = { ...thread(['ticket']), context: ['ticket'] }
     expect(policy.gate(unaddressed(quiet), context, [ticket])).toMatchObject({ admissible: false })
@@ -223,10 +223,10 @@ describe('revalidate and version', () => {
   })
   it('changes the Policy version for rules, accept mode and the Sources\' parts, not for pause, concurrency, models or Source configuration', () => {
     const version = setup().version
-    expect(setup({ ...base, paused: true, executor: { ...base.executor, maxWorkers: 9 }, eval: { ...base.eval, timeoutSeconds: 300 }, sources: { ...base.sources, github: { enabled: true, config: { pollSeconds: 600 } } } }).version).toBe(version)
+    expect(setup({ ...base, paused: true, executor: { ...base.executor, maxWorkers: 9 }, eval: { ...base.eval, timeoutSeconds: 300 }, sources: { ...base.sources, redmine: { enabled: true, config: { pollSeconds: 600 } } } }).version).toBe(version)
     expect(setup({ ...base, sources: { feishu: feishuSource({ chats: [], directMessages: false }) } }).version).toBe(version)
     expect(setup({ ...base, eval: { ...base.eval, mode: 'off' } }).version).not.toBe(version)
-    expect(setup({ ...base, policy: { ...base.policy, sources: { ...base.policy.sources, github: { allowed: [], admission: {} } } } }).version).not.toBe(version)
+    expect(setup({ ...base, policy: { ...base.policy, sources: { ...base.policy.sources, redmine: { allowed: [], admission: {} } } } }).version).not.toBe(version)
   })
 })
 describe('settings migration', () => {
@@ -410,45 +410,32 @@ describe('policy effects', () => {
 describe('bots and events without a sender', () => {
   const observing = (config: Record<string, unknown>, part: Record<string, unknown> = {},
     mode: 'auto' | 'off' = 'auto') => SettingsSchema.parse({
-    policy: { sources: { github: { allowed: [{ id: 'Alice' }], bots: [{ id: 'dependabot[bot]' }], ...part } } }, eval: { mode },
-    sources: { github: { enabled: true, config } } })
-  const comment: Trigger = { id: 'b', source: 'github', threads: [{ source: 'github', id: '1' }],
-    actor: { source: 'github', id: 'dependabot[bot]' }, human: false, at: '', text: 'Bump lodash',
-    meta: { number: 1, isPr: true, kind: 'conversation' } }
-  const ci = (meta: Record<string, unknown>): Trigger => ({ id: 'ci', source: 'github', threads: [{ source: 'github', id: 'ci:main' }],
-    actor: { source: 'github', id: '' }, human: false, at: '', text: 'CI failed 1/9 on main', meta: { ci: true, ...meta } })
+    policy: { sources: { redmine: { allowed: [{ id: 'Alice' }], bots: [{ id: 'robot-bot' }], ...part } } }, eval: { mode },
+    sources: { redmine: { enabled: true, config } } })
+  const comment: Trigger = { id: 'b', source: 'redmine', threads: [{ source: 'redmine', id: '1' }],
+    actor: { source: 'redmine', id: 'robot-bot' }, human: false, at: '', text: 'Bump lodash',
+    meta: { issueId: 1, kind: 'journal' } }
   it('admits a bot on its Source\'s list as an inferred candidate where the Source observes its scope, and no other bot', () => {
-    const { policy } = setup(observing({ observeComments: true }))
+    const { policy } = setup(observing({ observeJournals: true }))
     expect(policy.gate(comment, thread(), [])).toMatchObject({ admissible: true, strength: 'inferred',
-      basis: { via: 'bot', source: 'github', sender: 'dependabot[bot]', row: 'comments', observation: { mode: 'auto' } } })
+      basis: { via: 'bot', source: 'redmine', sender: 'robot-bot', row: 'journal', observation: { mode: 'auto' } } })
     // A bot that addresses the agent still makes no explicit request; on a Thread with tickets it is no follow-up either.
     expect(policy.gate({ ...comment, addressed: 'mention' }, thread(['ticket']), [ticket])).toMatchObject({ strength: 'inferred',
       basis: { via: 'bot', addressed: 'mention' } })
-    expect(policy.gate({ ...comment, actor: { source: 'github', id: 'renovate[bot]' } }, thread(), [])).toEqual({ admissible: false,
+    expect(policy.gate({ ...comment, actor: { source: 'redmine', id: 'other-bot' } }, thread(), [])).toEqual({ admissible: false,
       reason: 'not_human' })
     expect(setup(observing({})).policy.gate(comment, thread(), [])).toEqual({ admissible: false, reason: 'not_human' })
-    expect(setup(observing({ observeComments: true }, {}, 'off')).policy.gate(comment, thread(), [])).toEqual({ admissible: false,
+    expect(setup(observing({ observeJournals: true }, {}, 'off')).policy.gate(comment, thread(), [])).toEqual({ admissible: false,
       reason: 'admission_ignored' })
   })
   it('keeps a bot candidate\'s Mandate while the bot stays on its list and candidates may become work', () => {
-    const settings = observing({ observeComments: true })
+    const settings = observing({ observeJournals: true })
     const mandate = { strength: 'inferred' as const, policyVersion: '', actor: comment.actor, scope: '',
-      basis: { via: 'bot' as const, source: 'github', scope: comment.meta, row: 'comments', sender: 'dependabot[bot]',
+      basis: { via: 'bot' as const, source: 'redmine', scope: comment.meta, row: 'journal', sender: 'robot-bot',
         observation: { mode: 'auto' as const } } }
     expect(setup(settings).policy.revalidate(mandate)).toBe(true)
-    expect(setup(observing({ observeComments: true }, { bots: [] })).policy.revalidate(mandate)).toBe(false)
+    expect(setup(observing({ observeJournals: true }, { bots: [] })).policy.revalidate(mandate)).toBe(false)
     expect(setup({ ...settings, eval: { ...settings.eval, mode: 'observe' } }).policy.revalidate(mandate)).toBe(false)
-  })
-  it('admits the default branch\'s CI through its row once observed and set, and never a PR\'s CI', () => {
-    const admission = { ci: { unlistedUnaddressed: 'inferred' } }
-    const branch = setup(observing({ observeCi: true }, { admission })).policy.gate(ci({ branch: 'main' }), thread(), [])
-    expect(branch).toMatchObject({ admissible: true, strength: 'inferred',
-      basis: { via: 'admission', cell: 'unlistedUnaddressed', row: 'ci', observation: { mode: 'auto' } } })
-    // The cell defaults to ignore, so observing the CI changes nothing until the table says so.
-    expect(setup(observing({ observeCi: true })).policy.gate(ci({ branch: 'main' }), thread(), [])).toEqual({ admissible: false,
-      reason: 'admission_ignored' })
-    const pull = setup(observing({ observeCi: true }, { admission })).policy.gate(ci({ number: 9, isPr: true }), thread(), [])
-    expect(pull).toEqual({ admissible: false, reason: 'not_human' })
   })
   it('admits a Feishu bot on its list in a chat the Source observes', () => {
     const settings = SettingsSchema.parse({ ...base, policy: { ...base.policy, sources: { ...base.policy.sources,
@@ -461,26 +448,19 @@ describe('bots and events without a sender', () => {
     const unobserved = setup(settings).policy.gate({ ...alert, meta: { chatId: CHAT, direct: false, mentioned: false } }, thread(), [])
     expect(unobserved).toEqual({ admissible: false, reason: 'not_human' })
   })
-  it('says on the GitHub bot list when a listed bot\'s comment is received: when it mentions the agent, or comments are observed', () => {
-    const field = githubKind.policy!.fields.find(item => item.key === 'bots')!
-    const comments = githubKind.fields.find(item => item.key === 'observeComments')!.label
-    expect(field.hint!.en).toContain('mentions the agent')
-    expect(field.hint!.en).toContain(comments.en)
-    expect(field.hint!.zh).toContain(comments.zh)
+  it('says on the bot list that a listed bot\'s message may become a candidate, but never an explicit request', () => {
+    const field = feishuKind.policy!.fields.find(item => item.key === 'bots')!
+    expect(field.hint!.en).toContain('never make an explicit request')
+    expect(field.hint!.zh).toContain('不能发起明确的请求')
   })
-  it('names a GitHub Trigger\'s receiving scope, which the Source observes where its switch is on', () => {
+  it('names a Redmine Trigger\'s receiving scope, which the Source observes where its switch is on', () => {
     const { sources } = setup(observing({ observeIssues: true }))
-    const github = (meta: Record<string, unknown>) => ({ source: 'github', meta })
-    expect(sources.scope(github({ kind: 'issue', number: 3 }))).toEqual({ listened: true, observed: true, row: 'issues' })
-    expect(sources.scope(github({ kind: 'pull', number: 4, isPr: true }))).toEqual({ listened: true, observed: false, row: 'pulls' })
-    expect(sources.scope(github({ kind: 'inline', number: 4 }))).toEqual({ listened: true, observed: false, row: 'comments' })
-    expect(sources.scope(github({ ci: true, branch: 'main' }))).toEqual({ listened: true, observed: false, row: 'ci' })
-    expect(sources.scope(github({ ci: true, number: 4 }))).toEqual({ listened: true, observed: false })
-    const rows = githubKind.policy!.rows!({ observeIssues: true })
+    const redmineScope = (meta: Record<string, unknown>) => ({ source: 'redmine', meta })
+    expect(sources.scope(redmineScope({ kind: 'issue', issueId: 3 }))).toEqual({ listened: true, observed: true, row: 'issue' })
+    expect(sources.scope(redmineScope({ kind: 'journal', issueId: 4 }))).toEqual({ listened: true, observed: false, row: 'journal' })
+    const rows = redmineKind.policy!.rows!({ observeIssues: true })
     expect(rows.map(row => [row.id, row.cells])).toEqual([
-      ['issues', { listedUnaddressed: true, unlistedAddressed: true, unlistedUnaddressed: true }],
-      ['pulls', { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false }],
-      ['comments', { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false }],
-      ['ci', { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: false }]])
+      ['issue', { listedUnaddressed: true, unlistedAddressed: true, unlistedUnaddressed: true }],
+      ['journal', { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false }]])
   })
 })

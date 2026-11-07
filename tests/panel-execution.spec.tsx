@@ -8,15 +8,15 @@ import { MEMBER, server, ticketSummary, threadSummary } from './fixtures/panel-s
 
 usePanel()
 it('lists Tickets under Execution by who they wait on, with the Executor state and its pause as an action', async () => {
-  server.tickets.open = [ticketSummary(), ticketSummary({ id: 't2', title: '执行中的工单', threads: [{ key: 'github:7',
-    source: 'github', title: '#7 x', facts: { number: { value: '#7' }, autoMerge: { label: { zh: '自动合并', en: 'Auto-merge' },
+  server.tickets.open = [ticketSummary(), ticketSummary({ id: 't2', title: '执行中的工单', threads: [{ key: 'redmine:7',
+    source: 'redmine', title: '#7 x', facts: { number: { value: '#7' }, status: { label: { zh: '状态', en: 'Status' },
       value: { zh: '已开启', en: 'on' } } } }] })]
   await mount()
   await click(zh['tab.execution'])
   expect(document.querySelector('.dt-status-title')?.textContent).toBe(zh.statusTitle)
   expect(server.requests.some(request => request.path === 'tickets?state=open&limit=20')).toBe(true)
   expect(text()).toContain(zh.executorRunning)
-  expect(all('.dt-chip').map(chip => chip.textContent)).toContain('GitHub#7自动合并已开启')
+  expect(all('.dt-chip').map(chip => chip.textContent)).toContain('Redmine#7状态已开启')
   await click(zh.idleLabel)
   expect(server.requests.some(request => request.path === 'tickets?state=idle&limit=20')).toBe(true)
   expect(text()).toContain('执行器结束了当前回合')
@@ -67,10 +67,10 @@ it('shows a Ticket with its stage, its Mandate details with the Trigger and Deci
   expect(all('.dt-chip').map(chip => chip.textContent)).toContain('飞书团队群')
   await click(zh['term.channel'])
   expect(all('.dt-disclosure-body a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['飞书消息',
-    'https://applink.feishu.cn/client/chat/open?openChatId=oc_1'], ['GitHub #42', 'https://github.com/acme/widgets/issues/42']])
+    'https://applink.feishu.cn/client/chat/open?openChatId=oc_1'], ['Redmine #42', 'http://redmine.test/issues/42']])
   await click(zh['term.environment'])
   expect(all('.dt-disclosure-body .dt-table tr').map(row => row.textContent)).toEqual(['DSH_SUPERAGENT_DIR/w/t1',
-    'DSH_SUPERAGENT_GITHUB_NUMBER—'])
+    'DSH_SUPERAGENT_REDMINE_ISSUE_ID—'])
   await click(document.querySelector<HTMLElement>('.dt-trigger-link')!)
   expect(tab(zh['tab.trigger']).getAttribute('aria-selected')).toBe('true')
 })
@@ -84,8 +84,8 @@ it('reports a missing Ticket instead of rendering an empty page', async () => {
 it('links a question to its Channel, folds consecutive automated messages among Inputs, and shows field explanations in a hover tooltip',
   async () => {
   const ci = (id: string, at: string, failed: number) => ({ id, kind: 'trigger' as const, triggerId: `c${id}`, at, delivered: true,
-    trigger: { id: `c${id}`, actor: { source: 'github', id: '' }, human: false,
-      preview: `CI of PR #42 at abc1234: 10 checks, ${failed} failed, 0 running.`, thread: 'github:42' } })
+    trigger: { id: `c${id}`, actor: { source: 'redmine', id: '' }, human: false,
+      preview: `CI of issue #42 at abc1234: 10 checks, ${failed} failed, 0 running.`, thread: 'redmine:42' } })
   const t1 = server.ticketDetails.t1!
   server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'answer', attention: { id: 'q1', question: '需要确认按钮颜色' }, inputs: [ci('i3',
     '2026-09-22T00:06:00Z', 1), ci('i2', '2026-09-22T00:05:00Z', 0)] }
@@ -94,9 +94,9 @@ it('links a question to its Channel, folds consecutive automated messages among 
   expect(all('.dt-banner a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['去飞书回答',
     'https://applink.feishu.cn/client/chat/open?openChatId=oc_1']])
   await click('已送达的输入 · 2')
-  expect(all('.dt-disclosure-body .dt-row-title').map(title => title.textContent)).toEqual(['自动通知：CI of PR #42 at abc1234: 10 checks, 1 failed, 0 running.'])
+  expect(all('.dt-disclosure-body .dt-row-title').map(title => title.textContent)).toEqual(['自动通知：CI of issue #42 at abc1234: 10 checks, 1 failed, 0 running.'])
   await click('同一发送者之前还有 1 条自动消息')
-  expect(text()).toContain('CI of PR #42 at abc1234: 10 checks, 0 failed, 0 running.')
+  expect(text()).toContain('CI of issue #42 at abc1234: 10 checks, 0 failed, 0 running.')
   await click(zh['tab.eval'])
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   expect(text()).not.toContain('到期后记为未完成')
@@ -111,12 +111,12 @@ it('links a question to its Channel, folds consecutive automated messages among 
 it('offers a Ticket awaiting review its review place and Session in the page head', async () => {
   const t1 = server.ticketDetails.t1!
   server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'review', threads: [threadSummary(),
-    { ...threadSummary({ key: 'github:42', source: 'github', title: '#42 Fix login' }), url: 'https://github.com/acme/widgets/pull/42' }] }
+    { ...threadSummary({ key: 'redmine:42', source: 'redmine', title: '#42 Fix login' }), url: 'http://redmine.test/issues/42' }] }
   at({ page: 'execution', id: 't1' })
   await mount()
   expect(document.querySelector('.dt-status-line .dt-stage')?.textContent).toBe(zh['stage.review'])
-  expect(all('.dt-page-head a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['打开 GitHub 原文',
-    'https://github.com/acme/widgets/pull/42']])
+  expect(all('.dt-page-head a').map(link => [link.textContent, link.getAttribute('href')])).toEqual([['打开 Redmine 原文',
+    'http://redmine.test/issues/42']])
 })
 
 it('keeps what a person types in the Execution settings, converting it once on save', async () => {
@@ -126,17 +126,17 @@ it('keeps what a person types in the Execution settings, converting it once on s
   const blocked = () => field<HTMLInputElement>(zh.blockedCommands), root = () => field<HTMLInputElement>(zh.executionDirectory),
     workers = () => field<HTMLInputElement>(zh.maxWorkers)
   // A separator typed before the next command, a space inside a path and a cleared number stay as typed.
-  await type(blocked(), 'gh-personal ')
-  expect(blocked().value).toBe('gh-personal ')
-  await type(blocked(), 'gh-personal, gh-other')
+  await type(blocked(), 'personal-cli ')
+  expect(blocked().value).toBe('personal-cli ')
+  await type(blocked(), 'personal-cli, personal.other')
   await type(root(), '/srv/my work ')
   expect(root().value).toBe('/srv/my work ')
   await type(workers(), '')
   expect(workers().value).toBe('')
   await type(workers(), '2')
   await click(zh.save)
-  expect(server.requests.find(request => request.path === 'settings/executor')?.body).toMatchObject({ value: { blockedCommands: ['gh-personal', 'gh-other'], directory: '/srv/my work ', maxWorkers: 2 } })
-  expect(server.settings.executor).toMatchObject({ blockedCommands: ['gh-personal', 'gh-other'], directory: '/srv/my work', maxWorkers: 2 })
+  expect(server.requests.find(request => request.path === 'settings/executor')?.body).toMatchObject({ value: { blockedCommands: ['personal-cli', 'personal.other'], directory: '/srv/my work ', maxWorkers: 2 } })
+  expect(server.settings.executor).toMatchObject({ blockedCommands: ['personal-cli', 'personal.other'], directory: '/srv/my work', maxWorkers: 2 })
 })
 
 it('says why an Input was not delivered on its Ticket\'s page, in either language', async () => {
@@ -177,7 +177,7 @@ it('gives a Ticket a bot\'s message started its basis, marks a Thread it follows
   server.ticketDetails.t1 = { ...t1, mandate: { ...t1.mandate, strength: 'inferred', basis: { via: 'bot', sender: '评审机器人',
     observation: { mode: 'auto' } } },
   basis: { facts: [{ name: 'sender', value: '评审机器人' }, { name: 'bot' }, { name: 'mode', value: 'auto' }], legacy: false },
-  threads: [threadSummary(), { ...threadSummary({ key: 'github:7', title: '#7 相关 Issue' }), context: true }],
+  threads: [threadSummary(), { ...threadSummary({ key: 'redmine:7', title: '#7 相关事务' }), context: true }],
   inputs: [{ id: 'i1', kind: 'trigger', triggerId: 'e2', at: '2026-09-22T00:03:00Z', delivered: true, trigger: { id: 'e2',
     actor: { source: 'feishu', id: MEMBER, name: { zh: 'Alice', en: 'Alice' } }, human: true, preview: '顺便加一个页面',
     thread: 'feishu:oc_1:om_root', handback: { reason: 'Asks for a new page', at: '2026-09-22T00:05:00Z' } } }] }

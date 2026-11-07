@@ -1,24 +1,26 @@
 /** Structured startup and configuration errors with the settings location where the operator can fix them. */
 import { fill } from './infra/text.ts'
 
-export type SetupPlace = 'deployment' | 'github' | 'feishu'
+export type SetupPlace = 'deployment' | 'feishu' | 'redmine' | 'gerrit'
 export const SETUP_PROBLEMS = {
   foreignFile: ['deployment', '{file} was not written by dsh-superagent; move it, or choose another state directory.'],
-  gitTooOld: ['deployment', 'git does not read the github.com credential configuration dsh-superagent writes; dsh-superagent needs git 2.32 or later.'],
   environmentFailed: ['deployment', 'Preparing the agent environment failed.'],
-  repositoryUnset: ['github', 'The GitHub Source names no repository.'],
-  agentCliUnset: ['github', 'The agent GitHub CLI is not set.'],
-  agentCliMissing: ['github', 'The agent GitHub CLI was not found.'],
-  agentCliSignedOut: ['github', 'The agent GitHub CLI cannot read its account.'],
-  agentCliNoAccount: ['github', 'The agent GitHub CLI did not report a GitHub account.'],
-  repositoryUnreadable: ['github', '@{account} cannot read {repository}.'],
-  repositoryUnreported: ['github', 'The agent GitHub CLI did not return {repository}.'],
-  repositoryReadOnly: ['github', '@{account} cannot push to {repository}.'],
+  noSourceConfigured: ['deployment', 'No source is configured. Set up Redmine or Gerrit.'],
   feishuCliFailed: ['feishu', 'The bot lark-cli does not work.'],
   feishuNoApp: ['feishu', 'auth status of the bot lark-cli did not report the app.'],
   feishuBotNotReady: ['feishu', 'The bot identity of app {app} is {status}; configure the app secret with lark-cli.'],
   feishuUserIdentity: ['feishu', 'The bot lark-cli allows user identities (strict mode {mode}); give the bot its own lark-cli configuration in strict mode bot, as docs/006-deployment.md describes.'],
   feishuNoBot: ['feishu', 'The Feishu bot API did not return the bot\'s open_id.'],
+  redmineUrlUnset: ['redmine', 'The Redmine Source names no address.'],
+  redmineApiKeyUnset: ['redmine', 'The Redmine Source has no API key.'],
+  redmineApiKeyRefused: ['redmine', 'Redmine refused the API key of {url}.'],
+  redmineUnreadable: ['redmine', 'Redmine at {url} did not answer.'],
+  redmineNoAccount: ['redmine', 'Redmine at {url} did not report the account of the API key.'],
+  gerritUrlUnset: ['gerrit', 'The Gerrit Source names no address.'],
+  gerritUserUnset: ['gerrit', 'The Gerrit Source names no account.'],
+  gerritCredentialsRefused: ['gerrit', 'Gerrit refused the account of {url}.'],
+  gerritUnreadable: ['gerrit', 'Gerrit at {url} did not answer.'],
+  gerritNoProject: ['gerrit', 'Gerrit has no project named {project}.'],
 } as const satisfies Record<string, readonly [SetupPlace, string]>
 export type SetupCode = keyof typeof SETUP_PROBLEMS
 export interface SetupProblem { place: SetupPlace; code: SetupCode; values: Record<string, string>; detail: string }

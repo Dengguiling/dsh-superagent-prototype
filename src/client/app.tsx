@@ -8,6 +8,7 @@ import { ExecutionStatus } from './execution.tsx'
 import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
 import { OverviewPage } from './overview.tsx'
+import { PmsPage } from './pms.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
 import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type Location, type Route,
   type Tab } from './route.ts'
@@ -67,13 +68,12 @@ function Result({ name, open, children }: { name: ReactNode; open: (() => void) 
 }
 function SearchResults({ result, query, onClose }: { result: SearchView; query: string; onClose: () => void }) {
   const { t, navigate } = usePanel()
-  const { setup } = usePanelData()
   const empty = !result.items.length && !result.threads.length && !result.tickets.length
   const counts = { tickets: result.tickets.length, threads: result.threads.length, items: result.items.length }
   const go = (route: Route) => () => { onClose(); navigate(route) }
   return <div className="dt-search-results" role="region" aria-label={t('searchLabel')}>
     <div className="dt-search-head">
-      <span className="dt-hint">{empty ? t(setup?.accounts?.feishu ? 'searchNone' : 'searchNoneGithub')
+      <span className="dt-hint">{empty ? t('searchNone')
         : t(result.items.length >= 20 ? 'searchFoundCapped' : 'searchFound', counts)}</span>
       <Button variant="ghost" size="sm" icon={<Icon name="close" size={14} />} aria-label={t('close')} onClick={onClose} />
     </div>
@@ -146,6 +146,7 @@ function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab
   const waiting = error ? <p className="dt-error" role="alert">{error.message}</p> : <p className="dt-hint">{t('loading')}</p>
   const page = (() => {
     switch (route.page) {
+      case 'pms': return <PmsPage id={route.id} filter={route.query?.filter ?? 'active'} />
       case 'overview': return <OverviewPage />
       case 'source': return <SourceStatus />
       case 'trigger': return route.id !== undefined ? <ThreadPage key={route.id} id={route.id} target={route.query?.trigger} />

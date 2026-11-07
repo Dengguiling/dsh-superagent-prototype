@@ -5,7 +5,7 @@
 import { basename } from 'node:path'
 import { z } from 'zod'
 import { isoTime, said, type AcceptMode, type AdmissionCell, type ChannelRef, type Decision, type Execution, type Follow, type MandateBasis,
-  type Reason, type Thread, type Ticket, type TicketInput, type TriggerDisposition } from '../core/index.ts'
+  type Reason, type Thread, type Ticket, type TicketInput, type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { feishuChatLink } from '../sources/feishu-channel.ts'
 import { POLL_HORIZON_MS } from '../sources/poll.ts'
 import { SettingsSchema, policyVersion, type SettingsOrigin } from '../policy.ts'
@@ -17,7 +17,7 @@ import type { SettingsVersion, Store } from './store.ts'
 import { Versions } from './versions.ts'
 import { KV, type Key } from '../kv.ts'
 
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 12
 /** The oldest database schema version this build can open and migrate directly. */
 export const OLDEST_SCHEMA = 10
 /** Returns an error message explaining why `version` cannot be opened: older schemas need a new state directory. */
@@ -32,6 +32,37 @@ const text = (value: unknown): string | undefined => typeof value === 'string' &
 function step<T>(record: string, work: () => T): T {
   try { return work() } catch (error) { throw new Error(`${record}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }) }
 }
+/**
+ * Removes what the GitHub Source left behind: its settings block, its part of the Policy, its triggers, the threads that
+ * hosted them, the tickets that were worked on them, and its keys.
+ */
+export function migrateTo12(store: Store): void {
+  step('the settings', () => {
+    const settings = store.settings()
+    const { github: _github, ...sources } = settings.sources
+    const { github: _part, ...policySources } = settings.policy.sources
+    store.saveSettings({ ...settings, sources, policy: { ...settings.policy, sources: policySources } })
+    store.delete('settings-block:source:github')
+  })
+  const triggers = store.db.prepare('SELECT id, value FROM trigger').all()
+    .map(row => JSON.parse(String(row.value)) as Trigger)
+    .filter(trigger => trigger.source === 'github')
+  const ids = new Set(triggers.map(trigger => trigger.id))
+  for (const row of store.db.prepare('SELECT id, value FROM ticket').all()) {
+    const ticket = JSON.parse(String(row.value)) as Ticket
+    if (ids.has(ticket.origin.triggerId)) store.db.prepare('DELETE FROM ticket WHERE id=?').run(ticket.id)
+  }
+  for (const trigger of triggers) {
+    store.db.prepare('DELETE FROM trigger WHERE id=?').run(trigger.id)
+    store.db.prepare('DELETE FROM trigger_thread WHERE id=?').run(trigger.id)
+  }
+  for (const row of store.db.prepare('SELECT key, value FROM thread').all()) {
+    const thread = JSON.parse(String(row.value)) as Thread
+    if (thread.ref.source === 'github') store.db.prepare('DELETE FROM thread WHERE key=?').run(thread.key)
+  }
+  for (const name of store.keys('github-')) store.delete(name)
+}
+
 /** Rewrite all schema 10 records into their schema 11 shapes in place. */
 export function migrateTo11(store: Store): void {
   step('the settings', () => { migrateSettingsRecords(store) })
@@ -282,7 +313,7 @@ function legacyText(value: string): string {
 }
 /**
  * Upgrade a stored prompt configuration to current sections, tool names, and skill references; legacy configurations take
- * built-in team sections, keep custom guides as skills, and carry any auto-merge line threshold into `delivery`.
+ * built-in team sections and keep custom guides as skills.
  */
 function normalize(config: unknown): PromptConfig {
   const legacy = LegacyPromptConfigSchema.safeParse(config)
@@ -295,8 +326,7 @@ function normalize(config: unknown): PromptConfig {
 }
 /**
  * Normalize stored prompt revisions to current sections and names (recording original configs under `legacy` when saved
- * before team sections existed or unparseable) and synthesize a new revision for removed settings fields (auto-merge
- * threshold and cross-source member identities) unless an earlier migration already created it.
+ * before team sections existed or unparseable).
  */
 function migratePrompts(store: Store): void {
   // Preserve original configs on legacy or unparseable revisions, falling back to the last readable config so sessions always have valid prompts.
@@ -310,24 +340,6 @@ function migratePrompts(store: Store): void {
     store.set(`prompt-version:${version.revision}`, { ...version, config, ...kept })
     readable = config
   }
-  if (store.get('prompt-settings-text') === 1) return
-  const before = store.get<unknown>('settings-before-9')
-  const policy = (isObject(before) ? before.policy : undefined) as { autoMergeLineLimit?: unknown; members?: unknown } | undefined
-  const limit = typeof policy?.autoMergeLineLimit === 'number' ? policy.autoMergeLineLimit : 200
-  const mapped = ((Array.isArray(policy?.members) ? policy.members : []) as Member[]).filter(person => person.feishuId && person.github)
-  const revision = store.get<number>('prompt-revision')
-  const current = revision === undefined ? undefined : store.get<PromptVersion>(`prompt-version:${revision}`)
-  const config = current?.config ?? { ...teamDefaults, skills: {} }
-  const delivery = config.delivery.includes(autoMergeThreshold(200)) ? config.delivery.replace(autoMergeThreshold(200), autoMergeThreshold(limit))
-    : limit === 200 ? config.delivery : `${config.delivery}\nEnable auto-merge only on a PR that changes fewer than ${limit} lines (additions plus deletions).`
-  const identities = mapped.length && !config.skills.identities ? { identities: ['The same colleague may use a different account on each Source. When you mention, assign or request a review from someone you met on another Source, use their account on this one:',
-    ...mapped.map(person => `- ${person.name ?? person.feishuId} (Feishu ${person.feishuId}) is @${person.github} on GitHub`)].join('\n') } : {}
-  const next = { ...config, delivery, skills: { ...config.skills, ...identities } }
-  if (JSON.stringify(next) === JSON.stringify(config)) return
-  const previous = current?.revision ?? 0
-  if (!current) store.set('prompt-version:0', { revision: 0, previousRevision: null, savedAt: '', source: 'defaults', config })
-  store.set(`prompt-version:${previous + 1}`, { revision: previous + 1, previousRevision: previous, savedAt: new Date().toISOString(), source: 'settings-migration', config: next })
-  store.set('prompt-revision', previous + 1)
 }
 
 const CELLS: readonly string[] = ['listedUnaddressed', 'unlistedAddressed', 'unlistedUnaddressed']
@@ -517,13 +529,11 @@ function backfillThreadTimes(store: Store): void {
   }
 }
 
-/** Upgrade stored source state (Feishu topics, direct-chat flags, thread links, GitHub cursors, and pending assessments) to schema 11. */
+/** Upgrade stored source state (Feishu topics, direct-chat flags, thread links, and pending assessments) to schema 11. */
 function migrateSourceRecords(store: Store): void {
   feishuTopics(store)
   feishuDirectAddresses(store)
   feishuThreadLinks(store)
-  issueSourceRecords(store)
-  githubCursors(store)
   assessmentTriggers(store)
 }
 /** Convert legacy Feishu topic ID arrays into maps keyed by topic ID with the chat's last recovery timestamp. */
@@ -566,33 +576,6 @@ function feishuThreadLinks(store: Store): void {
     if (thread.ref.source !== 'feishu' || typeof thread.meta.url === 'string' || store.read.firstTrigger(thread.key)?.url) continue
     const chatId = thread.ref.id.split(':')[0]
     if (chatId) store.threads.save({ ...thread, meta: { ...thread.meta, url: feishuChatLink(lark ? 'lark' : 'feishu', chatId) } })
-  }
-}
-/**
- * Reassign triggers from the removed `github-issue` source to `github`, schedule a retry from the earliest waiting message
- * within `POLL_HORIZON_MS` on each issue that had pending messages, and delete the obsolete `github-issue` KV keys.
- */
-function issueSourceRecords(store: Store): void {
-  store.db.exec(`UPDATE trigger SET value = json_set(value, '$.source', 'github') WHERE value ->> '$.source' = 'github-issue'`)
-  const pending = store.get('github-issue-pending' as Key<Record<string, { number: number; at: string }>>) ?? {}
-  const retries = { ...store.get(KV.github.retries) }
-  for (const { number, at } of Object.values(pending)) {
-    if (!(Date.now() - Date.parse(at) < POLL_HORIZON_MS)) continue
-    const retry = retries[number]
-    retries[number] = { ...retry, since: retry && retry.since < at ? retry.since : at, pr: retry?.pr ?? false }
-  }
-  if (Object.keys(retries).length) store.set(KV.github.retries, retries)
-  const kept = ['github-issue-pending', 'github-issues-since', 'github-issues-started-at', ...store.keys('github-issue-eligibility:')]
-  for (const name of kept) store.delete(name)
-}
-/** Consolidate per-issue/PR notification and thread subscription cursors into a single cursor holding the later timestamp. */
-function githubCursors(store: Store): void {
-  for (const name of [...store.keys('github-thread:'), ...store.keys('thread-since:github:')]) {
-    const at = store.get<string>(name as Key<string>)
-    const cursor = KV.github.cursor(Number(name.slice(name.lastIndexOf(':') + 1)))
-    const current = store.get(cursor)
-    if (at && !(current && current >= at)) store.set(cursor, at)
-    store.delete(name)
   }
 }
 /** Attach trigger IDs to pending assessment effects and re-enqueue undelivered active evaluations so their timeout deadlines start. */

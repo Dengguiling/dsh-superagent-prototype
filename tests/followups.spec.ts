@@ -159,16 +159,16 @@ it('lets a worker follow a related thread for context, which the main Session he
   const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
   const master = h.agents.get(h.runtime.masterId)!
   master.inject.mockClear(); h.deliveries.mockClear()
-  expect(await h.runTool(sessionId, 'orchestrator_thread_follow', { thread: 'github:7',
-    reason: 'The issue it fixes.' })).toEqual({ followed: true, thread: 'github:7' })
+  expect(await h.runTool(sessionId, 'orchestrator_thread_follow', { thread: 'redmine:7',
+    reason: 'The issue it fixes.' })).toEqual({ followed: true, thread: 'redmine:7' })
   await h.runtime.idle()
-  expect(h.runtime.store.threads.get('github:7')).toMatchObject({ subscriptions: [ticket.id], context: [ticket.id] })
+  expect(h.runtime.store.threads.get('redmine:7')).toMatchObject({ subscriptions: [ticket.id], context: [ticket.id] })
   const text = (message: unknown) => (message as { content: { text: string }[] }).content[0]!.text
   const injected = master.inject.mock.calls.map(([message]) => JSON.parse(text(message)) as Record<string, unknown>)
-  expect(injected).toEqual([expect.objectContaining({ thread_followed: { ticket_id: ticket.id, thread: 'github:7',
+  expect(injected).toEqual([expect.objectContaining({ thread_followed: { ticket_id: ticket.id, thread: 'redmine:7',
     reason: 'The issue it fixes.' } })])
   expect(h.relays(h.runtime.masterId)).toEqual([])
-  await expect(h.runTool(sessionId, 'orchestrator_thread_follow', { thread: 'github', reason: 'x' })).rejects.toThrow(/<source>:<id>/)
+  await expect(h.runTool(sessionId, 'orchestrator_thread_follow', { thread: 'redmine', reason: 'x' })).rejects.toThrow(/<source>:<id>/)
   expect(await h.runTool(h.runtime.masterId, 'orchestrator_ticket_note', { ticket_id: ticket.id, text: 'Ticket B renamed the setting.' }))
     .toMatchObject({ reason: 'Noted for the worker' })
   await h.runtime.idle()

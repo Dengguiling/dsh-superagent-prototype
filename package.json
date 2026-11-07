@@ -4,7 +4,7 @@
   "license": "MIT",
   "version": "0.1.0",
   "private": true,
-  "description": "A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session.",
+  "description": "A proactive agent for a Redmine task system and a Gerrit review server, as a DSH (DeepSeek Harness) bundle: it listens to Redmine and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, executes each in its own DSH Session, and submits the patch to Gerrit.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -14,8 +14,9 @@
       "default": "./lib/index.js"
     },
     "./client": "./lib/client.js",
-    "./github-watch": "./lib/github-watch.js",
     "./feishu-watch": "./lib/feishu-watch.js",
+    "./redmine-watch": "./lib/redmine-watch.js",
+    "./gerrit-watch": "./lib/gerrit-watch.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },

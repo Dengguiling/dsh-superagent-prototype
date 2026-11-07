@@ -144,22 +144,22 @@ it('reports a service whose Feishu bot setup could not check as running, and rea
 })
 it('exits 2 while a part such as a Source reports an error, which a restart does not fix, and prints what it reports', async () => {
   processes(service(sleeper()))
-  const github = { health: { runtime: { state: 'ready', detail: '' }, github: { state: 'error', detail: 'bad token' } }, setup: {} }
-  const url = await answering(github, true)
+  const redmine = { health: { runtime: { state: 'ready', detail: '' }, redmine: { state: 'error', detail: 'bad token' } }, setup: {} }
+  const url = await answering(redmine, true)
   const checked = await run('status', '--url', url)
   expect(checked.code).toBe(2)
-  expect(JSON.parse(checked.stdout)).toMatchObject({ errors: { github: 'bad token' } })
+  expect(JSON.parse(checked.stdout)).toMatchObject({ errors: { redmine: 'bad token' } })
   expect(await run('start', '--url', url, '--timeout', '10'))
-    .toMatchObject({ code: 2, stdout: expect.stringContaining('github reports an error, which a restart does not fix: bad token') })
+    .toMatchObject({ code: 2, stdout: expect.stringContaining('redmine reports an error, which a restart does not fix: bad token') })
 }, 20_000)
 it('exits 3 while the service waits for setup, from status and from start, which a restart does not fix', async () => {
   processes(service(sleeper()))
   const waiting = { health: { runtime: { state: 'paused', detail: '' } },
-    setup: { problem: { code: 'repositoryUnset', detail: 'The GitHub Source names no repository.' }, feishuProblem: null } }
+    setup: { problem: { code: 'redmineUrlUnset', detail: 'The Redmine Source names no address.' }, feishuProblem: null } }
   const url = await answering(waiting, true)
   expect(await run('status', '--url', url)).toMatchObject({ code: 3 })
   expect(await run('start', '--url', url, '--timeout', '10'))
-    .toMatchObject({ code: 3, stdout: expect.stringContaining('waiting for setup: The GitHub Source names no repository.') })
+    .toMatchObject({ code: 3, stdout: expect.stringContaining('waiting for setup: The Redmine Source names no address.') })
 }, 20_000)
 it('restarts the service, and a restart whose graceful stop timed out does not keep recovery off', async () => {
   const url = await answering()

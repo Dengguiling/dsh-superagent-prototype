@@ -356,7 +356,7 @@ describe('a worker whose work runs in the background', () => {
     await handsOff({ state: 'failed', summary: 'The build broke.' })
   })
   it('frees the slot of a worker that reports ready on a ticket that follows its pull request', async () => {
-    await handsOff({ state: 'ready', summary: 'PR ready' }, ticketId => { h.runtime.engine.bindThread(ticketId, { source: 'github', id: '7' }, true) })
+    await handsOff({ state: 'ready', summary: 'change ready' }, ticketId => { h.runtime.engine.bindThread(ticketId, { source: 'gerrit', id: '7' }, true) })
   })
   it('frees the slot of a worker that asks a person a question with a progress report', async () => {
     await handsOff({ state: 'progress', summary: 'The server runs.', human_action: 'Does the button look right?' })
@@ -379,7 +379,7 @@ describe('a worker whose work runs in the background', () => {
     expect(agent.status).toBe('running')
   })
   it('leaves the jobs a worker left to a person out of a later turn\'s background work, and does not kill them at the limit', async () => {
-    const one = await handsOff({ state: 'ready', summary: 'PR ready' }, ticketId => { h.runtime.engine.bindThread(ticketId, { source: 'github', id: '7' }, true) })
+    const one = await handsOff({ state: 'ready', summary: 'change ready' }, ticketId => { h.runtime.engine.bindThread(ticketId, { source: 'gerrit', id: '7' }, true) })
     const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
     // A second server, left too; then a note from the orchestrator wakes the worker, whose turn ends without a report.
     const server = h.jobs.run(one.sessionId, 'pnpm preview')
@@ -396,8 +396,8 @@ describe('a worker whose work runs in the background', () => {
   })
   it('records each end of a worker\'s turn on its Assignment, also after its ready report', async () => {
     const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
-    h.runtime.engine.bindThread(one.ticket.id, { source: 'github', id: '7' }, true)
-    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'PR ready' }); await h.runtime.idle()
+    h.runtime.engine.bindThread(one.ticket.id, { source: 'gerrit', id: '7' }, true)
+    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'change ready' }); await h.runtime.idle()
     const report = latestAssignment(h.runtime.store.tickets.get(one.ticket.id)!)!.report!
     await new Promise(resolve => setTimeout(resolve, 5))
     idle(one.sessionId); await h.runtime.idle()
@@ -414,8 +414,8 @@ describe('a worker whose work runs in the background', () => {
   it('keeps a ticket open at a merge while its worker does in the background a message it acknowledged', async () => {
     const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
     const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
-    h.runtime.engine.bindThread(one.ticket.id, { source: 'github', id: '7' }, true)
-    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'PR ready' }); await h.runtime.idle()
+    h.runtime.engine.bindThread(one.ticket.id, { source: 'gerrit', id: '7' }, true)
+    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'change ready' }); await h.runtime.idle()
     idle(one.sessionId); await h.runtime.idle()
     // A person asks for more; the worker acknowledges it, starts the work in the background and its turn ends.
     await new Promise(resolve => setTimeout(resolve, 5))
@@ -425,7 +425,7 @@ describe('a worker whose work runs in the background', () => {
     await h.runTool(one.sessionId, 'orchestrator_ack', { trigger_id: more.id, text: '收到' })
     h.jobs.run(one.sessionId)
     idle(one.sessionId); await h.runtime.idle()
-    h.runtime.engine.threadClosed({ source: 'github', id: '7' }, 'merged', new Date().toISOString())
+    h.runtime.engine.threadClosed({ source: 'gerrit', id: '7' }, 'merged', new Date().toISOString())
     expect(ticket().ended).toBeUndefined()
     expect(h.jobs.service.kill).not.toHaveBeenCalled()
   })
@@ -433,8 +433,8 @@ describe('a worker whose work runs in the background', () => {
     const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
     const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
     // The ticket follows its pull request, so a ready report leaves it open.
-    h.runtime.engine.bindThread(one.ticket.id, { source: 'github', id: '7' }, true)
-    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'PR ready' })
+    h.runtime.engine.bindThread(one.ticket.id, { source: 'gerrit', id: '7' }, true)
+    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'change ready' })
     idle(one.sessionId); await h.runtime.idle()
     expect(h.runtime.executor.activeCount()).toBe(0)
     // A person asks for more; the worker starts the tests in the background and ends its turn.
@@ -505,9 +505,9 @@ describe('a worker whose work runs in the background', () => {
   it('holds a delivery that reached a worker while a hand-off stopped its subagents until the stop ended', async () => {
     const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
     const agent = h.agents.get(one.sessionId)!
-    h.runtime.engine.bindThread(one.ticket.id, { source: 'github', id: '7' }, true)
+    h.runtime.engine.bindThread(one.ticket.id, { source: 'gerrit', id: '7' }, true)
     h.subagents.spawn(one.sessionId)
-    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'PR ready' }); await h.runtime.idle()
+    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'change ready' }); await h.runtime.idle()
     // A person's message is on its way into the worker's Session, held there, as the worker hands off; the release is slow.
     const session = deferred(), drain = deferred(), release = h.subagents.service.drainChildren.getMockImplementation()!
     h.subagents.service.drainChildren.mockImplementationOnce(async (parent, ids) => { await drain.promise; await release(parent, ids) })
@@ -747,8 +747,8 @@ describe('what a worker read', () => {
   it('sends to Eval at a merge a message that reached the worker after its last step, which no step took before its turn ended', async () => {
     const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
     const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
-    h.runtime.engine.bindThread(one.ticket.id, { source: 'github', id: '7' }, true)
-    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'PR ready' }); await h.runtime.idle()
+    h.runtime.engine.bindThread(one.ticket.id, { source: 'gerrit', id: '7' }, true)
+    await h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'change ready' }); await h.runtime.idle()
     // A person's thanks reaches the worker after the step of its report, and its turn ends with no step taking it.
     await later()
     const thanks = feishu('2', '@bot 谢谢', { root_id: 'om_1' })
@@ -756,7 +756,7 @@ describe('what a worker read', () => {
     idle(one.sessionId)
     await vi.waitFor(() => expect(latestAssignment(ticket())?.report?.state).toBe('waiting'))
     await later()
-    h.runtime.engine.threadClosed({ source: 'github', id: '7' }, 'merged', new Date().toISOString())
+    h.runtime.engine.threadClosed({ source: 'gerrit', id: '7' }, 'merged', new Date().toISOString())
     await h.runtime.pump(); await h.runtime.idle()
     expect(ticket().ended).toMatchObject({ outcome: 'merged' })
     expect(h.candidates()).toContain(thanks.id)
@@ -884,7 +884,7 @@ describe('the Executor\'s parts', () => {
     const settings = SettingsSchema.parse({ policy: { rules: [{ id: 'copy', name: 'Copy fixes', enabled: true,
       instruction: 'Fix typos only.' }] } })
     const ticket = { id: 'ticket-0123456789abcdef', origin: { triggerId: 'tr1', triggerIds: [] },
-      mandate: { strength: 'inferred', policyVersion: 'v1', basis: { rules: ['copy'] }, actor: { source: 'github', id: 'alice' },
+      mandate: { strength: 'inferred', policyVersion: 'v1', basis: { rules: ['copy'] }, actor: { source: 'gerrit', id: 'alice' },
         scope: '' } } as unknown as Ticket
     const execution = ticketExecution(ticket, { kind: 'accept', title: 'Fix', scope: 'the typo', reason: 'r', name: 'fix-typo' } as never,
       settings, '/state')
@@ -915,12 +915,12 @@ describe('the Executor\'s parts', () => {
     expect(inputMessage({ id: 'i2', kind: 'text', at: '', text: 'Please also update the docs' })).toBe('Please also update the docs')
     // A Policy change says what it means for the ticket, without version hashes.
     const changed = inputMessage({ id: 'i3', kind: 'policy-changed', at: '', from: 'v1', to: 'v2', effect: { requesterAllowed: false,
-      requester: { source: 'github', id: 'ci-bot' },
+      requester: { source: 'gerrit', id: 'ci-bot' },
       rules: [{ id: 'copy', name: 'Copy fixes', change: 'changed', instruction: 'Fix typos only.' }, { id: 'visual', name: 'Visual', change: 'disabled' }] } })!
     expect(changed).toContain('Rule Copy fixes (copy), which this ticket was accepted under, changed. Keep the remaining work within it as it reads now: Fix typos only.')
     expect(changed).toContain('Rule Visual (visual), which this ticket was accepted under, no longer applies')
     // The sender is named, a bot as a person.
-    expect(changed).toContain('The sender this ticket is for, ci-bot on github, may no longer start work here')
+    expect(changed).toContain('The sender this ticket is for, ci-bot on gerrit, may no longer start work here')
     expect(changed).not.toContain('person')
     expect(changed).not.toContain('v2')
     const mode = inputMessage({ id: 'i6', kind: 'policy-changed', at: '', from: 'v1', to: 'v2', effect: { proactive: false } })!

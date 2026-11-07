@@ -12,6 +12,12 @@ it('names the same placeholders in both languages', () => {
   expect(keys.filter(key => !zh[key] || !en[key])).toEqual([])
 })
 
+it('names no removed product in either language', () => {
+  // GitHub left the product; the panel speaks of Redmine, Gerrit and Feishu.
+  expect(Object.entries(zh).filter(([, text]) => /github/i.test(text)).map(([key]) => key)).toEqual([])
+  expect(Object.entries(en).filter(([, text]) => /github/i.test(text)).map(([key]) => key)).toEqual([])
+})
+
 it('words a reason by its code with its values, each of a batch, and words a person or an assessor wrote as written', () => {
   const t = ((key: DshSuperagentKey, values: Record<string, string> = {}) => (zh[key] ?? key).replace(/\{(\w+)\}/g, (_match, name: string) => values[name] ?? '')) as T
   expect(reasonLabel(t, 'retried')).toBe(zh['reason.retried'])

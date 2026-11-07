@@ -1,8 +1,9 @@
-/** Overview page: pending Tickets requiring human action, active system problems, 24-hour flow counts, and Executor load. */
+/** Overview page: the live dashboard of the pipeline, the Tickets needing a person, and the system problems. */
 import type { ReactNode } from 'react'
 import { usePoll, type Problem } from './api.ts'
 import { Button, Icon } from './controls.tsx'
-import { useAction, usePanel, usePanelData } from './provider.tsx'
+import { LiveDashboard } from './dashboard.tsx'
+import { useAction, usePanel } from './provider.tsx'
 import { setupPage, settingsRoute, type Route } from './route.ts'
 import { TicketLine } from './rows.tsx'
 import { healthText, localized, reasonLabel, valueLabel, readableMarkers } from './text.ts'
@@ -53,25 +54,19 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
           onClick={() => { void post.run(() => call('POST decisions/:id/dismiss', { id: problem.decisionId })) }}>{t('dismiss')}</Button>
       </>)
     case 'outgoing': return row(t('problemReply', { source: valueLabel(t, 'source', problem.outgoing.channel.source),
-      attempts: problem.outgoing.attempts }),
-      raw(problem.outgoing.error), undefined)
+      attempts: problem.outgoing.attempts }), raw(problem.outgoing.error), undefined)
   }
 }
 
 export function OverviewPage() {
-  const { t, call, navigate } = usePanel()
-  const { setup } = usePanelData()
+  const { t, call } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET overview'), [])
+  const dashboard = usePoll(() => call('GET pms'), [])
   if (!data) return <LoadState error={error} loading />
-  const stat = (label: string, value: ReactNode, route?: Route) => <span className="dt-stat">
-    <span className="dt-stat-label">{label}</span>
-    {route ? <button type="button" className="dt-textlink dt-stat-value" onClick={() => navigate(route)}>{value}</button> : <span
-      className="dt-stat-value">{value}</span>}
-  </span>
-  const more = (route: Route) => <button type="button" className="dt-textlink dt-more-link"
-    onClick={() => navigate(route)}>{t('details')}</button>
   return <>
     {error && <LoadState error={error} loading={false} />}
+    {dashboard.data ? <LiveDashboard data={dashboard.data} />
+      : <Hint>{dashboard.error?.message ?? t('loading')}</Hint>}
     <Section title={t('pendingTickets')} count={data.person.length}>
       {data.person.length ? <ul className="dt-list dt-cards">{data.person.map(ticket => <TicketLine key={ticket.id} ticket={ticket} question
         onChanged={reload} />)}</ul>
@@ -81,23 +76,5 @@ export function OverviewPage() {
       <ul className="dt-list dt-cards">{data.problems.map((problem, index) => <ProblemLine key={index} problem={problem}
         onChanged={reload} />)}</ul>
     </Section>}
-    <Section title={t('lastDay')} action={more({ page: 'trigger', query: { filter: 'recent' } })}>
-      {/* Received and evaluated counts operate on Triggers rather than Threads or Decisions, so they do not link to filtered views. */}
-      <div className="dt-stats">
-        {stat(t('flowReceivedLabel'), data.flow.received)}
-        {stat(t('flowFilteredLabel'), data.flow.filtered, data.flow.filtered ? { page: 'source' } : undefined)}
-        {stat(t('flowJudgedLabel'), data.flow.judged)}
-        {stat(t('flowAcceptedLabel'), data.flow.accepted, { page: 'eval', query: { window: '24h' } })}
-        {data.flow.dropped > 0 && stat(t('flowDroppedLabel'), data.flow.dropped, { page: 'source' })}
-      </div>
-    </Section>
-    <Section title={t('term.executor')} action={more({ page: 'execution' })}>
-      {/* Pauses surface in `problems` above, so Executor counts render the same in both states; while setup waits, nothing runs. */}
-      {setup?.problem ? <Hint>{t('executorWaitingSetup')}</Hint> : <div className="dt-stats">
-        {stat(t('executingLabel'), `${data.executor.running} / ${data.executor.maxWorkers}`)}
-        {stat(t('queuedLabel'), data.executor.queued)}
-        {stat(t('idleLabel'), data.executor.idle)}
-      </div>}
-    </Section>
   </>
 }

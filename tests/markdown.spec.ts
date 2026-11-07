@@ -9,9 +9,9 @@ it('reads headings, paragraphs and lists, a list ending at a blank line or at an
 
 it('reads bold, inline code and links, and shows a bare address by its host and a short path', () => {
   const log = 'https://ci.example.com/runs/123456789012345678901234/log'
-  expect(inlines(`**Done**: \`npm test\` in [the PR](https://github.com/acme/widgets/pull/42), log at ${log}`))
+  expect(inlines(`**Done**: \`npm test\` in [the issue](http://redmine.test/issues/42), log at ${log}`))
     .toEqual([{ kind: 'bold', text: 'Done' }, { kind: 'text', text: ': ' }, { kind: 'code', text: 'npm test' },
-      { kind: 'text', text: ' in ' }, { kind: 'link', text: 'the PR', url: 'https://github.com/acme/widgets/pull/42' },
+      { kind: 'text', text: ' in ' }, { kind: 'link', text: 'the issue', url: 'http://redmine.test/issues/42' },
       { kind: 'text', text: ', log at ' },
       { kind: 'link', text: 'ci.example.com/runs/123456789012345678…', url: log }])
   expect(linkify('<b>**not bold**</b>')).toEqual([{ kind: 'text', text: '<b>**not bold**</b>' }])

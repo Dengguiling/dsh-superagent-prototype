@@ -6,11 +6,11 @@ import { changedSections, lineDiff, partText, partWith, sectionText, skillNameFr
 it('reads and writes a configuration by section, and lists the sections two configurations differ in', () => {
   const config = withSection(defaultPrompts(), 'skill/testing', 'Run the tests.')
   expect(sectionText(config, 'skill/testing')).toBe('Run the tests.')
-  expect([sectionText(config, 'runtime/shared'), sectionText(config, 'skill/github'), sectionText(config, 'skills')])
+  expect([sectionText(config, 'runtime/shared'), sectionText(config, 'skill/redmine'), sectionText(config, 'skills')])
     .toEqual([undefined, undefined, undefined])
   expect(changedSections(withSection(config, 'scope', 'Mine'), withoutSkill(config, 'skill/testing'))).toEqual(['scope', 'skill/testing'])
-  expect(['testing', 'github', 'Bad Name', 'ok-2'].map(name => skillNameFree(name, config, { skillName: SKILL_NAME.source,
-    builtin: ['github'] }))).toEqual([false, false, false, true])
+  expect(['testing', 'redmine', 'Bad Name', 'ok-2'].map(name => skillNameFree(name, config, { skillName: SKILL_NAME.source,
+    builtin: ['redmine'] }))).toEqual([false, false, false, true])
 })
 
 it('diffs two texts by line, folding a long unchanged run to its ends, and reads a team part with another text', () => {

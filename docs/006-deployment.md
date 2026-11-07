@@ -5,10 +5,11 @@ Use this guide to install, configure and operate dsh-superagent. It covers accou
 ## What runs
 
 - **A dedicated DeepSeek Harness profile**, called `superagent` in this guide. Create it from the Web profile template. It loads the bundle and serves its panel on `127.0.0.1`. Keep it separate from the profile you work in: the plugin changes process-wide `PATH` and git settings, and its process needs independent restarts and upgrades.
-- **An agent GitHub account.** The agent comments, pushes branches and opens pull requests as this account, through a GitHub CLI signed in only as that account.
+- **One Redmine account, bound to the Source.** In a company that is the operator's own account, and no separate agent account is needed: the agent reads the issues assigned to it, posts notes on them and takes work as that account, through a Redmine REST API key. In a deployment where the agent has an identity of its own, that account is the bound one.
+- **An agent Gerrit account.** The agent clones the ticket's repository, pushes patches for review and answers reviewers as this account, through an SSH key and an HTTP password.
 - **Optional:** a Feishu bot for chat requests.
 
-Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the repository and accounts, Policy for allowed lists, and Execution for worker directories and commands.
+Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the accounts, Policy for allowed lists, and Execution for worker directories and commands.
 
 ### Permissions and isolation
 
@@ -16,35 +17,44 @@ The bundle defines `dsh-superagent-worker` for Executors and `dsh-superagent-rou
 
 Opening a blank managed Session in the Web UI can select the profile's default preset. dsh-superagent restores its role-specific preset before the first turn.
 
-Both presets run with `danger-full-access` as the operator's OS user and read messages from subscribed Threads. Account wrappers choose the agent's credentials by default; they do not isolate the process. A worker can execute programs by path and read the operator's home directory. For isolation, use a dedicated OS account containing only the agent's credentials.
+Both presets run with `danger-full-access` as the operator's OS user and read messages from subscribed Threads. The Redmine key and the Gerrit password stay in the host's environment and never reach a worker; the SSH key does, through the worker's own git configuration. These are defaults, not an isolation boundary: a worker can execute programs by path and read the operator's home directory. For isolation, use a dedicated OS account containing only the agent's credentials.
 
 ## Prerequisites
 
 - Node.js 22.19+ or 24+, pnpm, git 2.32+, Python 3.8+ and tmux
-- GitHub CLI (`gh`) 2.48 or later. Source CLI fields must point to `gh` or `lark-cli` wrappers; the host relies on their subcommands and output formats.
-- A repository on github.com; GitHub Enterprise Server is not supported. To create a checkout per Ticket, keep a local clone from which the prepare command can add worktrees. Install `git-lfs` if that repository uses Git LFS.
+- A Redmine 4.2 task system with its REST web services enabled, and a Gerrit 2.15 code review server. The accounts and the flow of a patch through them are described in `docs/010-corporate-redmine-gerrit.md`.
+- git and curl, which reach the review server over SSH and HTTP. A Source CLI field must point to a wrapper; the host relies on its subcommands and output formats.
 - A model provider configured for DeepSeek Harness. dsh-superagent uses the profile's default model unless the Eval or Execution settings name another.
 - For Feishu: `lark-cli` (tested with 1.0.90) and a Feishu or Lark app with a bot
 
 ## Accounts
 
-### Agent GitHub account
+### Redmine account
 
-1. Create a GitHub user account for the agent and give it write access to the repository. A GitHub App cannot be the agent, because dsh-superagent reads the account's notifications.
-2. Give it a GitHub CLI that uses only its own credentials:
+The Redmine Source binds to one account. In a company that is the operator's own account, which already exists: no separate agent account is required, and the work is the issues assigned to that account.
+
+1. Use the operator's account, or create one if the agent should have an identity of its own. Its login is the name a person mentions in an issue (`@login`), so a readable one helps.
+2. Give that account an API key: *My account* → *API access key*. Enable *REST web services* in *Administration* → *Settings* → *Authentication* first.
+3. Give the account a project role that may read the issues it works and write notes on them. It needs no rights beyond that: the agent posts the notes it owes the issue through the Redmine Source, with that key.
+4. Put the key in the Redmine Source's settings, together with the account's login. Neither goes in the prompt or a ticket directory: the key is a credential, and dsh-superagent keeps it out of the agent's environment.
+
+### Gerrit account
+
+1. Create a Gerrit account for the agent with an SSH key and an HTTP password:
 
    ```sh
-   mkdir -p ~/.local/bin
-   cat > ~/.local/bin/gh-agent <<'EOF'
-   #!/bin/sh
-   GH_CONFIG_DIR="$HOME/.config/gh-agent" exec gh "$@"
-   EOF
-   chmod +x ~/.local/bin/gh-agent
-   gh-agent auth login
-   gh-agent api user --jq .login
+   ssh-keygen -t ed25519 -f ~/.ssh/dsh-superagent-gerrit -C 'dsh-superagent'
    ```
 
-   Sign in as the agent account; the last command prints its login. dsh-superagent reads the login the same way.
+   Register the public key under *Settings* → *SSH keys* of that account, and set an HTTP password under *Settings* → *HTTP password*.
+2. Give the account *Developer* (or better) on the repositories it works in, and *Submit* on the target branch. A person submits the change: the agent never merges its own work.
+3. Put the key's path in the Gerrit Source's settings. dsh-superagent writes it into the worker's git configuration, so a worker's `git push` reaches the review server without a host key prompt.
+
+   ```sh
+   git config --global core.sshCommand "ssh -i ~/.ssh/dsh-superagent-gerrit -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+   ```
+
+   dsh-superagent writes this itself into its own isolated git configuration; the line above is only what a person needs for their own pushes to the same server.
 
 ### Feishu bot (optional)
 
@@ -144,23 +154,24 @@ Check dsh-superagent: run `scripts/dsh-superagent --profile superagent status` i
 
 Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A settings change runs setup again. If you fix something outside the application, such as CLI authentication, choose **Check again**.
 
-1. **Sources.** Set the GitHub repository (`owner/name`) and agent CLI, for example `/home/me/.local/bin/gh-agent`. Requests normally arrive through the agent account's notifications. A new Issue or comment mentioning the account arrives on the next poll; adding a mention by editing an existing Issue body does not. Post a new comment instead. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, and whether to receive direct messages.
-2. **Policy.** The two example rules can be edited or removed. Under **On each Source**, add the GitHub accounts and Feishu users who may ask for work; until a list has someone, no request can become a Ticket. With Feishu, a chat can be chosen to sync the list from, at startup and on **Sync now**.
-3. **Execution.** The directory root and a prepare command. To give each Ticket a checkout of the repository:
+1. **Sources.** Set the Redmine address, the API key and login of the bound account; its project filter is optional, and empty reads every project the account sees. Set the Gerrit HTTP address, SSH address, account, HTTP password, key path, commit email and target branch; the Gerrit project is optional, and empty tracks the issue-referencing patches of every repository. A Redmine request arrives on the next poll: an issue assigned to the bound account, or one that mentions it, opens a Ticket. A Gerrit request arrives as a review comment on a change whose commit message names an issue. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, and whether to receive direct messages.
+2. **Policy.** The two example rules can be edited or removed. Under **On each Source**, add the Redmine, Gerrit and Feishu accounts who may ask for work; until a list has someone, no request can become a Ticket. With Feishu, a chat can be chosen to sync the list from, at startup and on **Sync now**.
+3. **Execution.** The directory root and a prepare command. To give each Ticket a checkout of its repository, clone it into the Ticket's directory:
 
    ```sh
-   git -C /home/me/src/widgets fetch --no-tags "https://github.com/$DSH_SUPERAGENT_GITHUB_REPOSITORY.git" "${DSH_SUPERAGENT_GITHUB_PR_HEAD:-HEAD}:refs/dsh-superagent/$DSH_SUPERAGENT_TICKET" &&
-   git -C /home/me/src/widgets worktree add -b "agent/$DSH_SUPERAGENT_NAME" "$DSH_SUPERAGENT_DIR" "refs/dsh-superagent/$DSH_SUPERAGENT_TICKET"
+   git clone "$DSH_SUPERAGENT_GERRIT_SSH_URL" "$DSH_SUPERAGENT_DIR"
    ```
 
-   List personal CLIs, such as one signed in to your own account, as blocked commands.
-4. **Prompts.** Set the team sections: the GitHub disclosure line, review bots, the commit author and the auto-merge condition.
+   The Gerrit SSH address follows the issue's Redmine project, so the same command checks out the repository the task names when the company keeps many. The worker may also clone it itself, when the directory is empty. List personal CLIs, such as one signed in to your own account, as blocked commands.
+4. **Prompts.** Set the team sections: the disclosure line, the review bots, the commit author and the reviews a change asks for.
 
 ### Management API
 
 The panel uses a local HTTP API that agents can also call. `SETUP.md` uses it to save settings, and the service script reads `GET state`.
 
 Send requests to `http://127.0.0.1:<port>/orchestrator/api/` with `x-orchestrator-request: 1`. The host must be `127.0.0.1:<port>` or `localhost:<port>`. Missing headers or an `Origin` from another site receive 403.
+
+A task system that stops answering does not hold the panel: every request to it is abandoned after 30 seconds, and the page says the task system did not answer.
 
 API saves have the panel's permissions. They can change execution environment and setup account fields, unlike saves made through the main Session's tools.
 
@@ -187,7 +198,7 @@ Health entries are grouped by responsibility:
 | `evals` | Unavailable Evals from the last hour with no later judgement or dismissal |
 | `assessment`, `launch`, `delivery`, `relay`, `notice`, `reply` | Stored work described in [003 Execution](003-execution.md); delivery counts waiting work, while reply covers Channel messages |
 | `worker` | Executor Session event handling; appears after its first failure |
-| `github`, `feishu`, `history` | Source polling, events and history recovery |
+| `redmine`, `gerrit`, `feishu`, `history` | Source polling, events and history recovery |
 | `sync:<source id>` | Allowed-list synchronization |
 
 A refusal has a status and `error`, its English text:
@@ -199,36 +210,36 @@ A refusal has a status and `error`, its English text:
 
 The blocks:
 
-- `source:github`, `source:feishu`: `{"enabled": true, "config": {…}}`. GitHub's config has `repository` and `cli`, and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
-- `policy`: `{"rules": […], "sources": {"github": {"allowed": [{"id": "<login>"}], "bots": [{"id": "dependabot[bot]"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, and by `issues`, `pulls`, `comments` or `ci` for GitHub; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
+- `source:redmine`, `source:gerrit`, `source:feishu`: `{"enabled": true, "config": {…}}`. Redmine's config has `baseUrl`, `apiKey`, `login` (the bound account; empty uses the account of the API key) and `project` (an optional filter; empty reads every project the account sees), and the switches `observeIssues` and `observeJournals`, off by default, which receive every new issue and every journal that does not mention the agent; Gerrit's has `httpUrl`, `sshUrl`, `project` (an optional single-repository override; empty tracks every repository), `user`, `password`, `keyPath`, `email` and `branch`, and the switches `observeComments` and `observeMessages`, off by default; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
+- `policy`: `{"rules": […], "sources": {"redmine": {"allowed": [{"id": "Alice Smith"}]}, "gerrit": {"allowed": [{"id": "bob"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, by `issue` or `journal` for Redmine, and by `comment` or `message` for Gerrit; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
 - `eval`: `mode`, `timeoutSeconds` and `model`.
 - `executor`: `model`, `maxWorkers`, `directory`, `prepare` and `blockedCommands`. The processing pause is a setting of its own, `paused`, which `POST executor/pause` sets.
 
-Changing a repository or CLI runs the corresponding setup check first. A failed check returns 400 with details in `setup`. A successful account change, or any save while setup is pending, returns `restarting: true`. The API is temporarily unavailable while the application restarts.
+Changing an account runs the corresponding setup check first. A failed check returns 400 with details in `setup`. A successful account change, or any save while setup is pending, returns `restarting: true`. The API is temporarily unavailable while the application restarts.
 
 ```sh
 api=http://127.0.0.1:3082/orchestrator/api
-rev=$(curl -s -H 'x-orchestrator-request: 1' $api/settings | jq '.sources[] | select(.id == "github") | .revision')
-curl -s -X PUT -H 'x-orchestrator-request: 1' -H 'content-type: application/json' $api/settings/source:github \
-  -d "{\"value\": {\"enabled\": true, \"config\": {\"repository\": \"acme/widgets\", \"cli\": \"$HOME/.local/bin/gh-agent\"}}, \"revision\": $rev}"
+rev=$(curl -s -H 'x-orchestrator-request: 1' $api/settings | jq '.sources[] | select(.id == "redmine") | .revision')
+curl -s -X PUT -H 'x-orchestrator-request: 1' -H 'content-type: application/json' $api/settings/source:redmine \
+  -d "{\"value\": {\"enabled\": true, \"config\": {\"baseUrl\": \"http://redmine.example.com\", \"apiKey\": \"$REDMINE_KEY\"}}, \"revision\": $rev}"
 ```
 
 ## Setup checks
 
 Setup uses the DeepSeek Harness subprocess service, as worker shells do. It removes environment variables whose names contain KEY, PASSWORD, SECRET or TOKEN.
 
-Setup verifies the GitHub repository and the agent's push access, writes the worker environment, and checks that git uses only the agent credentials for github.com. A Feishu setup failure disables only the Feishu Source.
+Setup verifies the Redmine account against `/users/current.json`, the Gerrit account against the review server, and the Gerrit project too when one is configured, writes the worker environment, and checks that the worker's git reaches the review server with the agent's own key. A failure in one Source disables only that Source.
 
 The process environment that setup writes:
 
-- **Command shims** in `<stateDir>/worker-bin`, first on `PATH`: `gh` runs the agent's CLI; `lark-cli` runs the bot's CLI; blocked commands fail. A shim removes its own directory from `PATH` before it runs its target.
-- **git configuration** in `<stateDir>/worker-gitconfig`: replaces the operator's global and system git configuration. It selects the agent CLI as the github.com credential helper, rewrites GitHub SSH addresses to HTTPS and defines Git LFS filters. Personal git settings such as an HTTP proxy do not apply. No commit identity is set here, git never prompts for credentials, and `GH_TOKEN` and `GITHUB_TOKEN` are removed.
+- **Command shims** in `<stateDir>/worker-bin`, first on `PATH`: `lark-cli` runs the bot's CLI; blocked commands fail. A shim removes its own directory from `PATH` before it runs its target.
+- **git configuration** in `<stateDir>/worker-gitconfig`: replaces the operator's global and system git configuration. It sets `core.sshCommand` so that the review server is reached with the agent's key alone, and defines Git LFS filters. Personal git settings such as an HTTP proxy do not apply. No commit identity is set here, and git never prompts for credentials.
 
 A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write stops setup. A Ticket directory inside a git repository whose own configuration adds credentials fails the Ticket.
 
 ## Try it
 
-From an allowed GitHub account, open an Issue or post a comment containing `@<agent login> <request>`. Within a polling interval (one minute by default), Overview should show a Ticket. The agent acknowledges the request, works in its own Session and directory, and delivers in the original conversation. For Feishu, mention the bot in a configured chat.
+From an account on the allowed list, open an issue in the task system that mentions the bound account (`@<login> <request>`) or assign it to the bound account. Within a polling interval (30 seconds by default), Overview should show a Ticket and the workbench should list the task. The agent acknowledges the request, works in its own Session and directory, and writes the result back as a note on the issue. For Feishu, mention the bot in a configured chat.
 
 ## Upgrade
 
@@ -251,15 +262,21 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `The agent GitHub CLI is not set.` | Set the agent's CLI on the GitHub card |
-| `The agent GitHub CLI was not found.` | Set the wrapper's absolute path, or a command name on `PATH` |
-| `The agent GitHub CLI cannot read its account` | Sign the wrapper in with `auth login` |
-| `@… cannot read …` or `@… cannot push to …` | Give the agent account write access to the repository |
-| `The GitHub Source names no repository.` | Set the repository, `owner/name`, on the GitHub card |
+| `The Redmine Source names no address.` | Set the Redmine address on the Redmine card |
+| `The Redmine Source has no API key.` | Give the bound account an API access key and set it on the Redmine card |
+| `Redmine refused the API key of …` | The key is wrong, or its account may not use the REST API; check *My account* → *API access key* |
+| `Redmine at … did not answer.` | The address is wrong, or the server is not reachable from this machine |
+| `Redmine at … did not report the account of the API key.` | The key belongs to no account, or the account is locked |
+| `The Gerrit Source names no address.` | Set the Gerrit HTTP address on the Gerrit card |
+| `Gerrit refused the account of …` | The HTTP password is wrong, or the account may not read the server |
+| `Gerrit at … did not answer.` | The address is wrong, or the server is not reachable from this machine |
+| `Gerrit has no project named …` | The optional Gerrit project is set, but the project does not exist or the account may not read it; empty the field to track every repository |
+| `No source is configured. Set up Redmine or Gerrit.` | Configure at least one of the two Sources |
 | A Ticket fails with `The prepare command failed: …` | The output names the cause, such as a wrong clone path; fix the command, then retry the Ticket |
-| `git does not read the github.com credential configuration dsh-superagent writes` | Install git 2.32 or later |
 | A Ticket fails with `The git configuration of the repository in … sets …` | Remove the named credential or `http.*.extraheader` settings from the clone's `.git/config` |
 | `… was not written by dsh-superagent` | Move the named file out of `<stateDir>/worker-bin` or `<stateDir>/worker-gitconfig`, or choose another `stateDir` |
+| The worker's `git push` fails with `Permission denied (publickey)` | The key path on the Gerrit card is wrong, or its public key is not registered with the account |
+| The worker's `git push` fails with `Permission denied (publickey)` although the key is registered | The key is an RSA key, which OpenSSH 8.8 and later refuse by default; dsh-superagent allows the old signature for such a key |
 | `The bot lark-cli allows user identities` | Point the Feishu Source at a bot-only configuration, as in Feishu bot above |
 | `The bot lark-cli does not work.` or `The bot identity of app … is …` | Check the configuration's app id and secret |
 | `The Feishu bot is not a member of the chat.` | Add the bot to the chat in the chat's settings; the next attempt succeeds |
@@ -271,4 +288,4 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | `dsh-superagent configuration has keys it does not use` (log) | Remove the named keys; the message says where each value lives now |
 | The log says the plugin is incompatible with the running dsh | Install a DeepSeek Harness version within the `engines.dsh` range |
 | The panel shows "Failed to load plugins" after a DeepSeek Harness upgrade | Restart the running instance |
-| Nothing happens after a mention | Check that the author is on the Source's allowed list, the Source is on, and processing is not paused. On GitHub, a mention added by editing an Issue's body is not received; mention the agent in a comment |
+| Nothing happens after a mention | Check that the author is on the Source's allowed list, the Source is on, and processing is not paused. In Redmine, a mention added by editing an issue's description is not received as a new trigger; write a new note instead |

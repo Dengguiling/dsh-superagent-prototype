@@ -56,7 +56,9 @@ it('asks DSH to read its settings entry again once a restart it started finished
 
 it('refuses keys of the previous configuration before registering anything', async () => {
   const { ctx } = context()
-  await expect(apply(ctx as never, Config({ stateDir: '/srv/state', github: { cli: 'gh' } } as never))).rejects.toThrow('github (now on the GitHub Source)')
+  // The GitHub Source is gone; its configuration key is not moved anywhere, so it is simply unknown.
+  await expect(apply(ctx as never, Config({ stateDir: '/srv/state', github: { cli: 'gh' } } as never))).rejects.toThrow('keys it does not use: github')
+  await expect(apply(ctx as never, Config({ stateDir: '/srv/state', repositoryPath: '/srv/repo' } as never))).rejects.toThrow('repositoryPath (now in the prepare command of the Execution settings)')
   expect(ctx.on).not.toHaveBeenCalled()
   expect(ctx.inject).not.toHaveBeenCalled()
 })

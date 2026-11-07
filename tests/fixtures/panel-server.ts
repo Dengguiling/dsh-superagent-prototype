@@ -16,15 +16,16 @@ import { SETUP_FIELDS } from '../../src/deployment.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema } from '../../src/policy.ts'
 import { SetupError, type SetupCode } from '../../src/setup.ts'
 import { feishuChannel } from '../../src/sources/feishu-trigger.ts'
-import { githubChannel } from '../../src/sources/github-trigger.ts'
+import { redmineChannel } from '../../src/sources/redmine-trigger.ts'
 import { feishuKind } from '../../src/sources/feishu.ts'
-import { githubKind } from '../../src/sources/github.ts'
+import { gerritKind } from '../../src/sources/gerrit.ts'
+import { redmineKind } from '../../src/sources/redmine.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
 import { testDeployment } from './deployment.ts'
 
 export const MEMBER = 'ou_alice'
-const ALLOWED: Record<string, { id: string; name?: string }[]> = { feishu: [{ id: MEMBER, name: 'Alice' }], github: [{ id: 'alice' }] }
+const ALLOWED: Record<string, { id: string; name?: string }[]> = { feishu: [{ id: MEMBER, name: 'Alice' }], redmine: [{ id: 'alice' }] }
 type Actor = TriggerRow['actor']
 /** Resolve an actor display label using the fixture policy's allowed list or the source kind's unnamed fallback. */
 export function actor(source: string, id: string, human = true): Actor {
@@ -39,7 +40,7 @@ const TICKET = {
   id: 't1', title: '修复回归', state: 'open', actions: { retry: false, stop: true }, strength: 'explicit', ended: undefined,
   attention: undefined, assignments: 1, inputs: 2, undelivered: 0, deliveryError: undefined, sessionId: 'worker-t1', directory: '/w/t1',
   summary: 'working on it', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z',
-  threads: [{ key: 'github:42', source: 'github', title: '#42 Fix login', url: 'https://github.com/acme/widgets/pull/42',
+  threads: [{ key: 'redmine:42', source: 'redmine', title: '#42 Fix login', url: 'http://redmine.test/issues/42',
     facts: { number: { value: '#42' }, ci: { label: { zh: 'CI 失败', en: 'CI failed' }, value: '1', problem: true } } }],
 } satisfies TicketFields
 export const ticketSummary = (fields: Partial<TicketFields> = {}, stage: TicketStage = { stage: 'working' }): TicketRow =>
@@ -68,18 +69,18 @@ export function found(id: string, at: string, { threadTitle, filtered,
 }
 export const promptVersion = (revision: number, config: PromptsView['current']['config']): PromptsView['current'] =>
   ({ revision, previousRevision: revision ? revision - 1 : null, savedAt: '', source: 'panel', config })
-/** Build a dropped outbound reply fixture (`feishu` replies to `oc_1`/`om_root`; `github` comments on PR #42). */
-export const droppedReply = (id: string, hoursAgo: number, source: 'feishu' | 'github', reason: DroppedReply['dropped']['reason'],
+/** Build a dropped outbound reply fixture (`feishu` replies to `oc_1`/`om_root`; `redmine` comments on issue #42). */
+export const droppedReply = (id: string, hoursAgo: number, source: 'feishu' | 'redmine', reason: DroppedReply['dropped']['reason'],
   { ticket, thread }: { ticket?: DroppedReply['ticket']; thread?: false } = {}): DroppedReply => ({
   id, preview: `Reply ${id}`, kind: 'reply',
-  channel: source === 'feishu' ? feishuChannel('oc_1', 'om_root') : githubChannel(42),
+  channel: source === 'feishu' ? feishuChannel('oc_1', 'om_root') : redmineChannel(42),
   dropped: { at: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(), reason }, ...ticket ? { ticket } : {},
-  ...thread === false ? {} : { thread: source === 'feishu' ? 'feishu:oc_1:om_root' : 'github:42' },
+  ...thread === false ? {} : { thread: source === 'feishu' ? 'feishu:oc_1:om_root' : 'redmine:42' },
 })
 const dayAgo = () => new Date(Date.now() - 86_400_000).toISOString()
 export const problemOf = (code: SetupCode, values: Record<string, string> = {}) => new SetupError(code, values).problem
 // The kinds' configurations differ, and the fake reads them only as the records the views carry.
-const KINDS = [feishuKind, githubKind] as unknown as SourceKind[]
+const KINDS = [feishuKind, redmineKind, gerritKind] as unknown as SourceKind[]
 export const MACHINE = { stateDir: '/srv/dsh-superagent', promptMaxChars: 100000, admissionContextMaxPages: 10,
   admissionContextTimeoutMs: 15000 }
 
@@ -93,6 +94,12 @@ export interface PanelServer {
   threads: ThreadRow[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
+  /** The Workbench inbox; a test replaces or patches it to force another pipeline state. */
+  pms: ApiResponse<'GET pms'>
+  /** The conversation of each task by issue id; a test replaces one to force another state, such as a conversation nobody may reply to. */
+  pmsTasks: Record<number, ApiResponse<'GET pms/:id'>>
+  /** Replies the panel posted, as the host records them: the issue they answer and their text. */
+  replies: { issue: number; text: string }[]
   requests: { path: string; method: string; body?: unknown }[]
   /** Requests with undeclared query params or invalid body presence; asserted empty after each test. */
   misuse: string[]
@@ -113,7 +120,7 @@ export let server: PanelServer
 
 function resolved() {
   const accounts = server.setup.accounts
-  return accounts ? testDeployment({ repository: accounts.repository, github: { cli: '/bin/false', login: accounts.agent, noreply: '' },
+  return accounts ? testDeployment({
     ...accounts.feishu ? { feishu: { cli: '/bin/false', ...accounts.feishu } } : { feishu: undefined } }) : undefined
 }
 /** Default source health: paused during setup; Feishu defaults to `socket closed` unless overridden or paused by setup. */
@@ -152,7 +159,7 @@ function sourceStatuses(): SourceStatusRow[] {
     const feishu = kind.kind === 'feishu'
     return { id: kind.kind, title: kind.title, installed: true, enabled, state, health, ...problem ? { problem } : {},
       stats: { received: feishu ? 12 : 0, filtered: feishu ? 2 : 0, lastAt: '2026-09-23T00:00:00Z' },
-      filtered: feishu ? [] : [{ id: 'e9', at: '2026-09-23T00:02:00Z', actor: actor('github', 'someone'), preview: 'looks wrong',
+      filtered: feishu ? [] : [{ id: 'e9', at: '2026-09-23T00:02:00Z', actor: actor('redmine', 'someone'), preview: 'looks wrong',
         reason: { code: 'source_disabled' } }],
       dropped: server.dropped.filter(item => item.channel.source === kind.kind && item.dropped.at >= dayAgo()) }
   })
@@ -173,7 +180,7 @@ const settingsView = (): ApiResponse<'GET settings'> => ({
     { owner: 'executor', enabled: true, variables: [{ key: 'DSH_SUPERAGENT_DIR', description: { zh: '工单的执行目录',
       en: 'The ticket directory' } },
       { key: 'DSH_SUPERAGENT_NAME', description: { zh: '工单短名', en: 'Short name' } }] },
-    { owner: 'github', enabled: false, variables: [{ key: 'DSH_SUPERAGENT_GITHUB_REPOSITORY', description: { zh: '仓库',
+    { owner: 'redmine', enabled: false, variables: [{ key: 'DSH_SUPERAGENT_REDMINE_PROJECT', description: { zh: '项目',
       en: 'Repository' } }] }] },
 })
 const overviewView = (): ApiResponse<'GET overview'> => {
@@ -201,6 +208,47 @@ const overviewView = (): ApiResponse<'GET overview'> => {
     policyVersion: 'abcdef1234567890',
   }
 }
+/** One task of the default inbox. */
+const pmsTask = (fields: ApiResponse<'GET pms'>['tasks'][number]): ApiResponse<'GET pms'>['tasks'][number] => fields
+/** The operator's assigned tasks of the default inbox: one the agent holds, one still open in the task system. */
+const PMS_TASKS = [
+  pmsTask({ id: 12, subject: 'SDK pagination skips the first page', status: 'New', priority: 'Normal', assignee: 'Zhang Wei', author: 'Li Na',
+    project: 'sdk', updated: '2026-11-05T09:00:00Z', url: 'http://redmine.test/issues/12',
+    ticket: { id: 'ticket-1', title: 'Fix SDK pagination', stage: 'working', change: 1003, session: 'worker-ticket-1' } }),
+  pmsTask({ id: 13, subject: 'CLI --timeout is ignored', status: 'In Progress', priority: 'High', assignee: 'Zhang Wei', author: 'Li Na',
+    project: 'sdk-cli', updated: '2026-11-05T10:00:00Z', url: 'http://redmine.test/issues/13' }),
+]
+/** A task the operator archived: it stays in the inbox, in the archived filter only. */
+const PMS_ARCHIVED = [pmsTask({ id: 9, subject: 'Old demo issue', status: 'New', priority: 'Low', assignee: 'Zhang Wei', author: 'Li Na',
+  project: 'demo', updated: '2026-11-03T09:00:00Z', url: 'http://redmine.test/issues/9', archivedAt: '2026-11-04T00:00:00Z' })]
+const PMS_SOURCE = (): ApiResponse<'GET pms'>['source'] => ({ name: 'demo', url: 'http://redmine.test', configured: true,
+  // Nothing runs while the deployment check waits, so the task system does not answer yet.
+  connected: !(server as PanelServer | undefined)?.setup.problem })
+/** The default Workbench view: the operator's tasks, one archived, and work in every pipeline station but idle. */
+const pmsView = (): ApiResponse<'GET pms'> => ({
+  tasks: PMS_TASKS.map(task => ({ ...task })),
+  archived: PMS_ARCHIVED.map(task => ({ ...task })),
+  pipeline: { tasks: 2, taken: 1, arrived: 5, evaluating: 1, tickets: 3, queued: 1, waiting: 1, idle: 0, ended: 2 },
+  executor: { running: 1, max: 4, paused: false },
+  source: PMS_SOURCE(),
+  updatedAt: '2026-11-05T10:00:00Z',
+})
+const pmsMessage = (fields: ApiResponse<'GET pms/:id'>['messages'][number]) => fields
+/** The conversations of the default inbox: the issue description, then the agent's, the operator's and others' notes. */
+const PMS_MESSAGES: Record<number, ApiResponse<'GET pms/:id'>['messages']> = {
+  12: [
+    pmsMessage({ id: 'issue-12', at: '2026-11-04T09:00:00Z', role: 'other', name: 'Li Na', text: 'After the first page the SDK client returns page 1 again.\n\nSteps: iterate three pages of a 150-item collection.\n\nExpected: pages 1, 2 and 3. Actual: 1, 1, 2.', url: 'http://redmine.test/issues/12' }),
+    pmsMessage({ id: 'journal-41', at: '2026-11-04T10:00:00Z', role: 'agent', name: 'Zhang Wei', text: 'The cursor starts at `page * size` in `pagination.py`, so the first page repeats. I will push a patch with the off-by-one fixed.', url: 'http://redmine.test/issues/12#change-41' }),
+    pmsMessage({ id: 'journal-42', at: '2026-11-04T11:00:00Z', role: 'you', name: 'Zhang Wei', text: 'Please cover the retry policy in the tests too.', url: 'http://redmine.test/issues/12#change-42' }),
+    pmsMessage({ id: 'journal-43', at: '2026-11-04T12:00:00Z', role: 'other', name: 'Li Na', text: 'The customer is blocked on this; push it today.', url: 'http://redmine.test/issues/12#change-43' }),
+  ],
+  13: [pmsMessage({ id: 'issue-13', at: '2026-11-04T09:30:00Z', role: 'other', name: 'Li Na', text: '`sdk-cli run --timeout 5` still waits for the default 60 seconds.', url: 'http://redmine.test/issues/13' })],
+  9: [pmsMessage({ id: 'issue-9', at: '2026-11-02T09:00:00Z', role: 'other', name: 'Li Na', text: 'The old demo issue, kept for reference.', url: 'http://redmine.test/issues/9' })],
+}
+/** The default conversations: every task of the inbox, with the task as its detail view shows it. */
+const pmsTasks = (view = pmsView()): Record<number, ApiResponse<'GET pms/:id'>> =>
+  Object.fromEntries([...view.tasks, ...view.archived].map(task => [task.id,
+    { task: { ...task }, messages: (PMS_MESSAGES[task.id] ?? []).map(message => ({ ...message })), canReply: true, source: { ...view.source } }]))
 export const acceptDecision = (): NonNullable<TicketPageView['decision']> => ({ id: 'd1', kind: 'accept', outcome: 'accept',
   reason: [{ code: 'explicitRouted' }], at: '2026-09-22T00:00:00Z', strength: 'explicit', ticketId: undefined,
   triggerIds: ['e1'], thread: 'feishu:oc_1:om_root', rules: [], preview: '@bot 修一下', ticketTitle: undefined })
@@ -210,10 +258,10 @@ const ticketDetail = (): TicketPageView => ({
     actor: actor('feishu', MEMBER), scope: '修复登录页回归' },
   basis: { facts: [{ name: 'sender', value: 'Alice' }, { name: 'addressed', value: 'mention' }], legacy: false },
   environment: [{ key: 'DSH_SUPERAGENT_DIR', value: '/w/t1', description: { zh: '执行目录', en: 'Directory' }, owner: 'executor' },
-    { key: 'DSH_SUPERAGENT_GITHUB_NUMBER', value: '', description: { zh: '编号', en: 'Number' }, owner: 'github' }],
+    { key: 'DSH_SUPERAGENT_REDMINE_ISSUE_ID', value: '', description: { zh: '编号', en: 'Number' }, owner: 'redmine' }],
   channels: [{ source: 'feishu', url: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1', label: { zh: '飞书消息',
     en: 'Feishu message' } },
-    { source: 'github', url: 'https://github.com/acme/widgets/issues/42', label: { zh: 'GitHub #42', en: 'GitHub #42' } }],
+    { source: 'redmine', url: 'http://redmine.test/issues/42', label: { zh: 'Redmine #42', en: 'Redmine #42' } }],
   assignments: [{ id: 'a1', state: 'running', createdAt: '2026-09-22T00:00:00Z',
     startedAt: '2026-09-22T00:01:00Z',
     report: { state: 'progress', summary: 'working', at: '2026-09-22T00:02:00Z' } }],
@@ -223,7 +271,7 @@ const ticketDetail = (): TicketPageView => ({
 })
 function threadPage(key: string, { before, around }: { before?: string; around?: string }): ThreadPageView | undefined {
   if (key !== threadSummary().key) return undefined
-  const base = { ...threadSummary(), tickets: [ticketSummary()], correlated: [{ key: 'github:42', title: 'PR 42' }], decisions: [],
+  const base = { ...threadSummary(), tickets: [ticketSummary()], correlated: [{ key: 'redmine:42', title: '事务 42' }], decisions: [],
     url: 'https://example.test/thread', context: [] }
   const decision = { id: 'd1', outcome: 'accept' as const, reason: [{ code: 'said', values: { text: 'x' } }], ticketId: 't1' }
   if (before === 'cursor-1' || around === 'e1') return { ...base, timeline: [trigger('e1', '2026-09-20T00:00:00Z',
@@ -234,11 +282,13 @@ function threadPage(key: string, { before, around }: { before?: string; around?:
 function initial(): PanelServer {
   const settings = SettingsSchema.parse({
     policy: { sources: { feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: 'oc_team' },
-      github: { allowed: [{ id: 'alice' }] } },
+      redmine: { allowed: [{ id: 'alice' }] }, gerrit: { allowed: [] } },
       rules: [{ id: 'copy', name: '文案修改', enabled: true, instruction: '修正明确的文案错误' }] },
     sources: { feishu: { enabled: true, config: { cli: 'lark-bot', chats: [{ chatId: 'oc_team', listen: 'mentions' }],
       directMessages: true } },
-      github: { enabled: true, config: { repository: 'acme/widgets', cli: 'gh-agent' } } },
+      redmine: { enabled: true, config: { baseUrl: 'http://redmine.test', apiKey: 'key', login: 'alice', project: 'demo' } },
+      gerrit: { enabled: true, config: { httpUrl: 'http://gerrit.test:8080', sshUrl: 'ssh://agent@gerrit.test:29418', project: 'widgets',
+        user: 'agent-bot', password: '', keyPath: '', email: 'agent@example.test', branch: 'main' } } },
     executor: { blockedCommands: ['gh-personal'] },
   })
   const ended = ticketSummary({ id: 't0', title: '旧工单', state: 'ended', actions: { retry: false, stop: false },
@@ -249,10 +299,10 @@ function initial(): PanelServer {
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
-      accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
-        name: 'Widgets Bot' } } },
+      accounts: { agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
+        name: 'Widgets Bot' }, redmine: { login: 'alice', project: 'demo' }, gerrit: { user: 'agent-bot', project: 'widgets' } } },
     settings, revisions: { policy: 3, eval: 1, executor: 0 },
-    prompts: { masterId: 'master', sections: TEAM_SECTIONS, skillName: SKILL_NAME.source, builtin: ['feishu', 'github'],
+    prompts: { masterId: 'master', sections: TEAM_SECTIONS, skillName: SKILL_NAME.source, builtin: ['feishu', 'redmine', 'gerrit'],
       skillPrefix: SKILL_PREFIX, revision: 0, current: { ...defaults, config: defaultPrompts() },
       defaults: defaultPrompts(), parts: Object.entries(builtInParts()).map(([key, part]) => ({ key, ...part, base: builtInBase(part.text) })),
       defaultChanged: [], revisions: [{ ...defaults, changed: [] }], sessions: [], notificationPending: false, next_offset: null },
@@ -264,6 +314,9 @@ function initial(): PanelServer {
         summary: 'LlmError: no adapter registered for provider "provider-a"',
         note: { text: 'LlmError: no adapter registered for provider "provider-a"', error: true } }, { stage: 'person', action: 'failed' })],
     search: { items: [], threads: [] },
+    pms: pmsView(),
+    pmsTasks: pmsTasks(),
+    replies: [],
     history: { current: 3, policyVersion: 'abcdef1234567890', items: [
       { revision: 4, savedAt: '2026-09-23T00:00:00Z', source: 'panel', policyVersion: '9876543210fedcba', policyChanged: true, notified: [],
         block: 'source:feishu',
@@ -293,6 +346,43 @@ const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
+  'GET pms': { answer: () => server.pms },
+  'GET pms/:id': { answer: ({ params }) => server.pmsTasks[Number(params.id)] ?? refuse(404, 'Task not found') },
+  'POST pms/:id/reply': { body: true, answer: ({ params, body }) => {
+    const issue = Number(params.id)
+    const detail = server.pmsTasks[issue]
+    if (!detail) return refuse(404, 'Task not found')
+    const text = body.text.trim()
+    if (!text || text.length > 4000) return refuse(400, 'A reply needs 1 to 4000 characters')
+    // As the host does: the note is on the issue at once, so a reload shows it in the conversation.
+    const at = new Date().toISOString(), id = `journal-${90 + server.replies.length}`
+    server.replies.push({ issue, text })
+    server.pmsTasks[issue] = { ...detail, messages: [...detail.messages, { id, at, role: 'you', name: detail.task.assignee, text,
+      url: `http://redmine.test/issues/${issue}#change-${90 + server.replies.length}` }] }
+    return { sent: true }
+  } },
+  'POST pms/:id/archive': { body: true, answer: ({ params, body }) => {
+    const issue = Number(params.id), at = new Date().toISOString()
+    const all = [...server.pms.tasks, ...server.pms.archived]
+    const task = all.find(item => item.id === issue)
+    if (!task) return refuse(404, 'Task not found')
+    const others = all.filter(item => item.id !== issue)
+    const { archivedAt: _archivedAt, ...rest } = task
+    const moved = body.archived ? { ...rest, archivedAt: task.archivedAt ?? at } : rest
+    server.pms = { ...server.pms, tasks: [...others.filter(item => !item.archivedAt), ...body.archived ? [] : [moved]],
+      archived: [...others.filter(item => !!item.archivedAt), ...body.archived ? [moved] : []] }
+    const detail = server.pmsTasks[issue]
+    if (detail) server.pmsTasks[issue] = { ...detail, task: { ...moved } }
+    return { archived: body.archived }
+  } },
+  'POST pms/:id/delete': { answer: ({ params }) => {
+    const issue = Number(params.id)
+    if (![...server.pms.tasks, ...server.pms.archived].some(item => item.id === issue)) return refuse(404, 'Task not found')
+    server.pms = { ...server.pms, tasks: server.pms.tasks.filter(item => item.id !== issue),
+      archived: server.pms.archived.filter(item => item.id !== issue) }
+    delete server.pmsTasks[issue]
+    return { deleted: true }
+  } },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
     await server.searching?.(q)
@@ -389,7 +479,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     return { revision: server.prompts.revision, context_delivery: 'injected' }
   } },
   'POST prompts/preview': { body: true, answer: ({ body }) => {
-    const skills = [...server.setup.accounts?.feishu ? ['feishu'] : [], 'github', ...Object.keys(body.skills)].map(name => [name,
+    const skills = [...server.setup.accounts?.feishu ? ['feishu'] : [], 'redmine', 'gerrit', ...Object.keys(body.skills)].map(name => [name,
       composeSkill(body, name)])
     // The generated parts from their templates, without variables or rules.
     const environment = environmentSection(body, []), policy = policySection(SettingsSchema.parse({ policy: { rules: [] } }), body)

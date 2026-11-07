@@ -1,0 +1,208 @@
+name: dsh-superagent-env
+
+# ---------------------------------------------------------------------------
+# Mock "corporate development environment" for the dsh-superagent prototype.
+#
+#   pg            PostgreSQL 13        – database backing Redmine
+#   redmine       Redmine 4.2.10       – task tracker ("PMS") on :3000
+#   redmine-init  one-shot              – REST API enable + PM/dev API keys
+#   gerrit        Gerrit 2.15.13        – code review on :8080 / ssh :29418
+#
+# The redmine-init service is a one-shot: it runs to completion and exits 0.
+# `docker compose up -d` therefore leaves a fully seeded, authenticated stack.
+# The gerrit service bootstraps its own site on the very first start (see
+# gerrit/start.sh) and afterwards serves with HTTP basic authentication.
+# ---------------------------------------------------------------------------
+
+services:
+  # ------------------------------------------------------------------ pg --
+  pg:
+    image: postgres:13-bullseye
+    container_name: dsh-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${REDMINE_DB_NAME}
+      POSTGRES_USER: ${REDMINE_DB_USER}
+      POSTGRES_PASSWORD: ${REDMINE_DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${REDMINE_DB_USER} -d ${REDMINE_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks: [dsh]
+
+  # ------------------------------------------------------------- redmine --
+  redmine:
+    image: redmine:4.2.10
+    container_name: dsh-redmine
+    restart: unless-stopped
+    depends_on:
+      pg:
+        condition: service_healthy
+    environment:
+      REDMINE_DB_POSTGRES: pg
+      REDMINE_DB_HOST: pg
+      REDMINE_DB_PORT: 5432
+      REDMINE_DB_USERNAME: ${REDMINE_DB_USER}
+      REDMINE_DB_PASSWORD: ${REDMINE_DB_PASSWORD}
+      REDMINE_DB_DATABASE: ${REDMINE_DB_NAME}
+      REDMINE_SECRET_KEY_BASE: ${REDMINE_SECRET_KEY_BASE}
+      RAILS_ENV: production
+      REDMINE_ADMIN_LOGIN: ${REDMINE_ADMIN_LOGIN}
+      REDMINE_ADMIN_PASSWORD: ${REDMINE_ADMIN_PASSWORD}
+    ports:
+      - "${REDMINE_PORT}:3000"
+    volumes:
+      - redmine_files:/usr/src/redmine/files
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS -o /dev/null http://localhost:3000/ || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 90s
+    networks: [dsh]
+
+  # -------------------------------------------------------- redmine-init --
+  # Runs the Rails bootstrap inside the redmine image:
+  #   * enables "REST web services" (Administration > Settings > Authentication)
+  #   * pins the admin (PM) + dev API keys to the values in .env
+  #   * gives the admin the display name of the project manager
+  #   * creates the `dev` user or renames the old `agent` account to `dev`
+  #     (keeping its user id and API key)
+  # It exits 0 when done (docker compose reports it as "exited (0)").
+  redmine-init:
+    image: redmine:4.2.10
+    container_name: dsh-redmine-init
+    depends_on:
+      redmine:
+        condition: service_healthy
+    environment:
+      REDMINE_DB_POSTGRES: pg
+      REDMINE_DB_HOST: pg
+      REDMINE_DB_PORT: 5432
+      REDMINE_DB_USERNAME: ${REDMINE_DB_USER}
+      REDMINE_DB_PASSWORD: ${REDMINE_DB_PASSWORD}
+      REDMINE_DB_DATABASE: ${REDMINE_DB_NAME}
+      REDMINE_SECRET_KEY_BASE: ${REDMINE_SECRET_KEY_BASE}
+      RAILS_ENV: production
+      REDMINE_NO_DB_MIGRATE: "1"
+      REDMINE_ADMIN_LOGIN: ${REDMINE_ADMIN_LOGIN}
+      REDMINE_ADMIN_PASSWORD: ${REDMINE_ADMIN_PASSWORD}
+      REDMINE_ADMIN_API_KEY: ${REDMINE_ADMIN_API_KEY}
+      REDMINE_PM_FIRSTNAME: ${REDMINE_PM_FIRSTNAME}
+      REDMINE_PM_LASTNAME: ${REDMINE_PM_LASTNAME}
+      REDMINE_PM_MAIL: ${REDMINE_PM_MAIL}
+      REDMINE_DEV_LOGIN: ${REDMINE_DEV_LOGIN}
+      REDMINE_DEV_PASSWORD: ${REDMINE_DEV_PASSWORD}
+      REDMINE_DEV_API_KEY: ${REDMINE_DEV_API_KEY}
+      REDMINE_DEV_FIRSTNAME: ${REDMINE_DEV_FIRSTNAME}
+      REDMINE_DEV_LASTNAME: ${REDMINE_DEV_LASTNAME}
+      REDMINE_DEV_MAIL: ${REDMINE_DEV_MAIL}
+      REDMINE_LEGACY_DEV_LOGIN: ${REDMINE_LEGACY_DEV_LOGIN}
+    volumes:
+      - ./redmine/init.rb:/bootstrap/init.rb:ro
+    command: ["rails", "runner", "/bootstrap/init.rb"]
+    restart: "no"
+    networks: [dsh]
+
+  # -------------------------------------------------------------- gerrit --
+  gerrit:
+    image: gerritcodereview/gerrit:2.15.13
+    platform: linux/amd64
+    container_name: dsh-gerrit
+    restart: unless-stopped
+    environment:
+      GERRIT_SITE: /var/gerrit
+      CANONICAL_WEB_URL: ${GERRIT_CANONICAL_WEB_URL}
+      GERRIT_ADMIN_LOGIN: ${GERRIT_ADMIN_LOGIN}
+      GERRIT_ADMIN_EMAIL: ${GERRIT_ADMIN_EMAIL}
+      GERRIT_ADMIN_PASSWORD: ${GERRIT_ADMIN_PASSWORD}
+      GERRIT_AGENT_LOGIN: ${GERRIT_AGENT_LOGIN}
+      GERRIT_AGENT_EMAIL: ${GERRIT_AGENT_EMAIL}
+      GERRIT_AGENT_PASSWORD: ${GERRIT_AGENT_PASSWORD}
+    ports:
+      - "${GERRIT_SSH_PORT}:29418"
+    volumes:
+      - gerrit_etc:/var/gerrit/etc
+      - gerrit_db:/var/gerrit/db
+      - gerrit_git:/var/gerrit/git
+      - gerrit_index:/var/gerrit/index
+      - gerrit_cache:/var/gerrit/cache
+      - ./gerrit/start.sh:/bootstrap/start.sh:ro
+      - ./keys/agent_id_ecdsa.pub:/bootstrap/agent_id_ecdsa.pub:ro
+      - ./keys/agent_id_rsa.pub:/bootstrap/agent_id_rsa.pub:ro
+    command: ["/bin/bash", "/bootstrap/start.sh"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS -u \"$${GERRIT_ADMIN_LOGIN}:$${GERRIT_ADMIN_PASSWORD}\" -o /dev/null http://localhost:8080/a/config/server/version || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 300s
+    networks: [dsh]
+
+  # ------------------------------------------------------------- proxy --
+  # The front end of the review server.  Gerrit 2.15 in "auth.type = HTTP"
+  # mode expects a web server in front of it that authenticates the person and
+  # hands the identity over in the Authorization header; it has no sign-in
+  # form of its own.  The proxy asks the browser for the credentials and passes
+  # the header to Gerrit, which checks the password of the account.
+  proxy:
+    image: nginx:alpine
+    container_name: dsh-gerrit-proxy
+    restart: unless-stopped
+    depends_on:
+      gerrit:
+        condition: service_healthy
+    ports:
+      - "${GERRIT_HTTP_PORT}:8080"
+    # the accounts of the review server; the front end keeps the password files
+    # of the web UI and of the API in sync with them (see gerrit/proxy-start.sh)
+    environment:
+      GERRIT_WEB_LOGIN: ${GERRIT_WEB_LOGIN}
+      GERRIT_WEB_PASSWORD: ${GERRIT_WEB_PASSWORD}
+      GERRIT_AGENT_LOGIN: ${GERRIT_AGENT_LOGIN}
+      GERRIT_AGENT_PASSWORD: ${GERRIT_AGENT_PASSWORD}
+      GERRIT_ADMIN_LOGIN: ${GERRIT_ADMIN_LOGIN}
+      GERRIT_ADMIN_PASSWORD: ${GERRIT_ADMIN_PASSWORD}
+    volumes:
+      - ./gerrit/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./gerrit/proxy-start.sh:/bootstrap/proxy-start.sh:ro
+    command: ["/bin/sh", "/bootstrap/proxy-start.sh"]
+    healthcheck:
+      # the proxy answers a request without credentials with the challenge of
+      # the web server, which is the answer it is expected to give
+      test:
+        [
+          "CMD-SHELL",
+          "wget -S -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q 'HTTP/1.1 401' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks: [dsh]
+
+networks:
+  dsh:
+    name: dsh-superagent-env
+
+volumes:
+  pg_data:
+  redmine_files:
+  gerrit_etc:
+  gerrit_db:
+  gerrit_git:
+  gerrit_index:
+  gerrit_cache:

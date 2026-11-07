@@ -3,3 +3,6 @@ lib/
 .artifacts/
 .env
 coverage/
+
+# The ledger of the local tooling.
+.mimosa/

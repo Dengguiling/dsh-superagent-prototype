@@ -4,6 +4,7 @@ import type { PromptConfig, Prompts } from './prompts.ts'
 import type { PromptsView, StateView, TicketPageView } from './http.ts'
 import type { HistoryView } from './settings-history.ts'
 import type { OverviewView } from './views/overview.ts'
+import type { PmsTaskView, PmsView } from './views/pms.ts'
 import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
@@ -20,6 +21,11 @@ type Delivery = 'injected' | 'pending'
 export interface Api {
   'GET state': { response: StateView }
   'GET overview': { response: OverviewView }
+  'GET pms': { response: PmsView }
+  'GET pms/:id': { response: PmsTaskView }
+  'POST pms/:id/reply': { body: { text: string }; response: { sent: true } }
+  'POST pms/:id/archive': { body: { archived: boolean }; response: { archived: boolean } }
+  'POST pms/:id/delete': { response: { deleted: true } }
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }
   'GET settings': { response: SettingsView }

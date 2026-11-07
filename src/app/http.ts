@@ -11,8 +11,9 @@ import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, b
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
-import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
+import { UserError, type EngineForPeople, type Ticket, type Trigger } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
+import type { Commands } from '../infra/commands.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
@@ -23,6 +24,7 @@ import type { LinkTarget, ViewHost } from './views/records.ts'
 import type { Variable } from './execution-environment.ts'
 import { policyHistory } from './settings-history.ts'
 import { overview } from './views/overview.ts'
+import { pms, pmsArchive, pmsDelete, pmsReply, pmsTask } from './views/pms.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
@@ -30,6 +32,8 @@ import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
 
 export interface HttpHost {
   readonly store: Store
+  /** The transport the Sources use, so a view can read the task system live. */
+  readonly commands: Commands
   /** Feishu message links resolved since startup, used by search to match AppLink URLs. */
   readonly sourceLinks: Pick<TextCache, 'entries'>
   readonly sources: SourceRegistry
@@ -50,6 +54,8 @@ export interface HttpHost {
   configured(): boolean
   links(): LinkTarget
   ticketEnvironment(ticket: Ticket): Variable[]
+  /** Hands a Trigger to the Engine and schedules the pass that assesses it, as a Source would. */
+  receive(trigger: Trigger): unknown
   checkSetup(): void
   requestPass(): void
   models(): Promise<ModelCatalog>
@@ -98,7 +104,9 @@ function setupView(runtime: HttpHost) {
   const resolved = runtime.configured() ? runtime.deployment : undefined
   return {
     machine: machineView(runtime.machine), problem: runtime.setupProblem ?? null, feishuProblem: runtime.feishuProblem ?? null,
-    accounts: resolved ? { repository: resolved.repository, agent: resolved.github.login, feishu: resolved.feishu ? { appId: resolved.feishu.appId, brand: resolved.feishu.brand, botId: resolved.feishu.botId, name: resolved.feishu.name } : null } : null,
+    accounts: resolved ? { agent: resolved.gerrit?.user ?? resolved.redmine?.login ?? '', feishu: resolved.feishu ? { appId: resolved.feishu.appId, brand: resolved.feishu.brand, botId: resolved.feishu.botId, name: resolved.feishu.name } : null,
+      redmine: resolved.redmine ? { login: resolved.redmine.login, project: resolved.redmine.project } : null,
+      gerrit: resolved.gerrit ? { user: resolved.gerrit.user, project: resolved.gerrit.project } : null } : null,
   }
 }
 /** Build the `/orchestrator/api/state` response consumed by the management panel and `scripts/dsh-superagent status` (`docs/006-deployment.md`). */
@@ -147,13 +155,43 @@ const PromptsQuery = z.object({ revision: count.optional(), offset: count.defaul
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
+const ReplyRequest = z.object({ text: z.string() })
+const ArchiveRequest = z.object({ archived: z.boolean() })
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
+  /** The issue a task route names; an id no issue can have is a task that does not exist. */
+  const task = (id: string) => {
+    const issue = Number(id)
+    if (!Number.isInteger(issue) || issue <= 0) throw new RouteError(404, 'Task not found')
+    return issue
+  }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
+    'GET pms': () => pms(runtime.store, runtime.commands, runtime.deployment, runtime.executor.activeCount()),
+    'GET pms/:id': async ({ params }) => {
+      const detail = await pmsTask(runtime.store, runtime.commands, runtime.deployment, task(params.id))
+      if (!detail) throw new RouteError(404, 'Task not found')
+      return detail
+    },
+    'POST pms/:id/reply': async ({ params, body }) => {
+      const { text } = ReplyRequest.parse(await body())
+      const reply = text.trim()
+      if (!reply || reply.length > 4000) throw new RouteError(400, 'A reply needs 1 to 4000 characters')
+      // Only a task of the operator's own inbox may be answered, as the detail page reads it.
+      const issue = task(params.id)
+      if (!await pmsTask(runtime.store, runtime.commands, runtime.deployment, issue)) throw new RouteError(404, 'Task not found')
+      await pmsReply(runtime.store, runtime.commands, runtime.deployment, issue, reply, trigger => runtime.receive(trigger))
+      return { sent: true }
+    },
+    'POST pms/:id/archive': async ({ params, body }) => {
+      const { archived } = ArchiveRequest.parse(await body())
+      pmsArchive(runtime.store, task(params.id), archived)
+      return { archived }
+    },
+    'POST pms/:id/delete': ({ params }) => { pmsDelete(runtime.store, task(params.id)); return { deleted: true } },
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
       executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),

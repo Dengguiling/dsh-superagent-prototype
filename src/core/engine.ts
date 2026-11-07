@@ -60,7 +60,7 @@ export class Engine {
    * its worker took up a person's message the ticket decides after its latest report.
    */
   threadClosed(thread: ThreadRef, outcome: 'merged' | 'closed', at: string): void {
-    // Normalize source timestamps (such as GitHub whole seconds) to canonical ISO form.
+    // Normalize source timestamps (such as the whole seconds of a task system) to canonical ISO form.
     this.repo.atomic(() => { this.tickets.threadClosed(thread, outcome, isoTime(at)) })
   }
 

@@ -1,0 +1,150 @@
+# 010 Corporate Redmine and Gerrit
+
+This is the deployment of dsh-superagent in a company whose tasks live in Redmine and whose code is reviewed in Gerrit, in many repositories. The flow is:
+
+1. The project manager opens a Redmine issue and assigns it to the operator's account, the one account the agent is bound to.
+2. The Redmine Source reads it, the Eval accepts it, and a Ticket opens.
+3. A worker Session works in the Ticket's directory, and clones the repository named by the issue's Redmine project identifier.
+4. The worker commits, names the issue in the commit message with an `Issue:` trailer, pushes the patch to `refs/for/<branch>`, and reports the change number.
+5. The Gerrit Source finds that change by the trailer, in whichever repository it lives, and hands the review comments on it to the same worker.
+6. A reviewer merges the change; the Ticket ends, and the outcome is written back to the Redmine issue as a note.
+
+The Sources, the prompt sections and the skills of this deployment are the built-in ones; only the account settings differ from the general deployment of [006 Deployment](006-deployment.md).
+
+## What this deployment uses
+
+| | Redmine | Gerrit |
+| --- | --- | --- |
+| The task | An issue, and its discussion | — |
+| The work | — | A patch pushed to `refs/for/<branch>` |
+| The review | — | Comments on the change |
+| The end | The result is written back as a note on the issue | The change is submitted |
+| The agent's identity | The operator's own account, bound through its API key; no separate agent account | A Gerrit account with an SSH key and an HTTP password |
+
+One Redmine account is enough. In the company the operator already has an account and cannot create another one, so the Source binds to the operator's own account: the project manager assigns the issues to it, and the agent reads and answers them as it. The Source still tells the agent's notes and the panel's notes from a person's by markers, so the operator's own Redmine notes on an issue reach the agent as human input even though the account is shared.
+
+The Redmine and Gerrit Sources are inserted disabled, as Feishu is; enable them in the profile's `cordis.patch.yml`:
+
+```yaml
+- insert:
+    - id: dsh-superagent-redmine
+      name: dsh-superagent/redmine-watch
+      disabled: false
+    - id: dsh-superagent-gerrit
+      name: dsh-superagent/gerrit-watch
+      disabled: false
+```
+
+## The settings
+
+Both Sources are configured under *Settings* → *Sources*.
+
+**Redmine**
+
+| Field | Meaning |
+| --- | --- |
+| Address | `http://redmine.example.com`, without a trailing slash |
+| API key | The REST web services key of the bound account; a credential, never in the agent's environment |
+| Login | The bound account's login; empty uses the account of the API key |
+| Project | An optional project filter; empty reads every project the account sees, which is the usual setting here |
+| Receive new issues | Whether an issue that does not mention the agent is received at all |
+| Receive discussion | Whether a journal that does not mention the agent is received at all |
+
+**Gerrit**
+
+| Field | Meaning |
+| --- | --- |
+| Address | `http://gerrit.example.com:8080`, the HTTP address of the review server |
+| SSH address | `ssh://agent@gerrit.example.com:29418`, without the project; the agent appends the repository the issue names |
+| Project | An optional single-repository override; empty, the recommended setting, tracks the issue-referencing patches of every repository |
+| Account | The user name on Gerrit; a change belongs to the agent when this account owns it |
+| HTTP password | The account's HTTP password, used to read review comments; a credential |
+| SSH private key | The path of the key whose public key is registered with the account |
+| Commit email | The email Gerrit accepts; commit as it when the ticket names no author |
+| Target branch | The branch patches are pushed to, such as `main` |
+
+Saving either Source restarts dsh-superagent, which checks the accounts: the Redmine key against `/users/current.json`, and the Gerrit account against the review server, with the project checked too when one is set. A Source whose account does not answer stays off, and the panel says why.
+
+## Many repositories
+
+The company has many repositories, so one configured project cannot name the work. A change belongs to a task when its commit message names the task's Redmine issue in an `Issue:` trailer (`Bug:` and `Feature:` are accepted too), and the Gerrit Source tracks such changes across every repository: on each poll it lists the open changes, keeps those that name an issue, and binds each one to the Ticket that works that issue. A change without the trailer is ignored, whatever repository it is in. The optional Gerrit project narrows tracking to that one repository, which a small installation may want; the company leaves it empty.
+
+The repository of a task is the identifier of the Redmine project the issue belongs to. A Redmine project identifier and a Gerrit project name are the same string, so the issue itself says where its patch goes.
+
+A review comment on another person's patch for the same issue binds to that issue's Ticket too: the comment's Trigger carries both the Gerrit change and the Redmine issue as its Threads, so the issue's worker receives it.
+
+## The prepare command
+
+The Execution settings carry the command that prepares a Ticket's directory. It runs in the Ticket's parent directory with the Ticket's environment variables, so it clones the repository the Ticket works on:
+
+```sh
+git clone "$DSH_SUPERAGENT_GERRIT_SSH_URL" "$DSH_SUPERAGENT_DIR"
+```
+
+`DSH_SUPERAGENT_GERRIT_SSH_URL` follows the issue: it is the Gerrit Source's SSH address with the issue's Redmine project identifier appended, so the same command checks out the right repository whichever project the task belongs to. A configured Gerrit project overrides it. The clone uses the key the Gerrit Source names, because dsh-superagent writes `core.sshCommand` into the worker's isolated git configuration.
+
+The prepare command is optional. Without one, the Ticket's directory stays empty and the worker clones the repository itself, which the Gerrit skill shows.
+
+## The Policy
+
+Under *Settings* → *Policy* → *Eval → On each Source*, the Redmine Source lists the people whose issues and journals may start work — in the company, the project managers — and the Gerrit Source lists the people whose review comments may.
+
+Redmine's API reports the **display name** of an author beside its id, and no login, so the Redmine list holds the names Redmine shows (`Li Na`). The Gerrit list holds the user names of Gerrit (`bob`), which is what its API reports.
+
+A Redmine request addresses the agent when the issue is assigned to the bound account, or when the text holds `@<login>`. A Gerrit request addresses it when the review comment holds `@<account>`. Both are the conventions those systems have, not mentions of their own.
+
+An issue that arrives while the agent works reaches the worker as a follow-up, whether or not it mentions the agent, as long as the person who wrote it is on the list.
+
+## What the worker does
+
+The worker Session loads the `dsh-superagent-redmine` and `dsh-superagent-gerrit` skills. The Gerrit skill holds the exact commands of the clone and the push:
+
+```sh
+git clone "$DSH_SUPERAGENT_GERRIT_SSH_URL" .
+git switch -c "agent/$DSH_SUPERAGENT_NAME"
+CHANGE_ID="I$(openssl rand -hex 20)"
+git commit -m "Fix the login redirect" -m "Issue: $DSH_SUPERAGENT_REDMINE_ISSUE_ID" -m "Change-Id: $CHANGE_ID"
+git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:$DSH_SUPERAGENT_GERRIT_PUSH_REF"
+```
+
+The `Issue:` trailer is what names the ticket on the change: it is how the change is tracked and bound to the Ticket, in whatever repository it lives. The change's topic, which the push option sets, carries the ticket's branch name and is kept for installations that already rely on it. The `Change-Id` trailer is what Gerrit itself requires.
+
+A later patch set **amends** the commit; it never adds a second commit. Gerrit refuses a push that carries one `Change-Id` in two commits, and a second commit would become a change of its own:
+
+```sh
+git commit --amend -m "Fix the login redirect" -m "Issue: $DSH_SUPERAGENT_REDMINE_ISSUE_ID" -m "Change-Id: $CHANGE_ID"
+```
+
+The push output names the change, in the form Gerrit 2.15 uses: `remote:   http://<host>/#/c/<project>/+/<number>`.
+
+The worker reports the change number the push printed:
+
+```
+orchestrator_report(state: progress, summary: "Pushed the patch for review", change_number: 1003)
+```
+
+The host binds that change to the Ticket, so the review comments on it reach the same worker, and the merge ends the Ticket.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| The panel says the Redmine Source waits for the deployment check | The account did not answer. Check the address and the API key; *Administration* → *Settings* → *Authentication* must have *REST web services* on |
+| The panel says Gerrit refused the account | The HTTP password is wrong, or the account may not read the server. Gerrit answers `/a/` only with the account's HTTP password |
+| The panel says Gerrit has no project named … | The optional Gerrit project is set. The project name does not exist, or the account may not read it; empty the field to track every repository |
+| No issue is ever received | The issue does not mention the bound account and is not assigned to it, and *Receive new issues* is off. The cursor starts when the Source is switched on: earlier issues are not read |
+| The push fails with `remote: Change-Id header is missing` | The commit has no `Change-Id` trailer. The Gerrit skill shows how to add one |
+| The push fails with `Permission denied (publickey)` | The key path in the Gerrit Source is wrong, or its public key is not registered with the account |
+| The push fails with `Permission denied (publickey)` although the key is registered | The key is an RSA key: it is signed with SHA-1, which OpenSSH 8.8 and later refuse by default. dsh-superagent adds `-o PubkeyAcceptedKeyTypes=+ssh-rsa` by itself when the configured key is an RSA key |
+| The Gerrit web UI answers with a **Configuration Error** page | Two causes. First, Gerrit 2.15 in `auth.type = HTTP` mode looks the user up as the external id `gerrit:<login>`, and only the HTTP login flow creates that external id: an account created over the REST API can never be used in the browser, because Gerrit tries to create a second account with the same user name and refuses with `name already in use`. The account a person uses must therefore be created by signing in over HTTP. Second, Gerrit 2.15 has no sign-in form of its own — it expects a web server in front of it that asks the browser for the credentials and hands the identity over in the `Authorization` header. A browser answers such a challenge on a page but never on a background request, and the web UI reads all of its data in the background, so the challenge has to come from that front end |
+| The push fails with `Too many authentication failures` | The worker offers the keys of the SSH agent before the configured one. dsh-superagent writes `-o IdentitiesOnly=yes`, so the configured key is the only one offered |
+| The change is not bound to the Ticket | Its commit message names no issue and its topic does not carry the ticket's name. Add the `Issue:` trailer with the Redmine issue number, or push under the ticket's topic; a configured Gerrit project also hides the repository if it names another one |
+| The review comments do not reach the worker | The comments are on a change whose commit message names no issue, or the author is not on the Gerrit list. Both must hold |
+| The push is refused with `same Change-Id in multiple changes` | The branch carries a second commit with the same `Change-Id`. Amend the commit instead of adding one |
+| The worker's git asks for a host key | dsh-superagent writes `core.sshCommand` with `StrictHostKeyChecking=no`; a worker that pushes outside its Ticket directory does not use it |
+
+## The local environment
+
+`env/` holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are assigned to the bound account, while a project manager account can assign more. See `env/README.md` for every address, account, API key and SSH key of that stack.
+
+`scripts/live/redmine.ts` and `scripts/live/gerrit.ts` check the two Sources against a running Redmine and Gerrit: they list the changed issues and the open changes, read one with its journals and its comments, post a note and a review message, and run a poll round that must turn an issue, a journal and a review comment into Triggers. Run them with `npx vite-node scripts/live/redmine.ts` and the addresses and credentials of the environment as `REDMINE_URL`, `REDMINE_KEY`, `REDMINE_LOGIN`, `REDMINE_NAME`, `REDMINE_ID`, `REDMINE_PROJECT`, `GERRIT_URL`, `GERRIT_USER`, `GERRIT_PASS`, `GERRIT_PROJECT` and `GERRIT_BRANCH`.
