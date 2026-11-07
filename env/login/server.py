@@ -87,12 +87,28 @@ REDMINE_INTERNAL = setting("SIGNIN_REDMINE_INTERNAL_URL", "http://redmine:3000")
 # the three roles of the environment; the key is used in the URL of the
 # sign-in, the label is what the page shows
 ROLES = (
-    ("admin", "Administrator", "the system manager, the highest rights"),
-    ("lead", "Leader", "assigns the work and reviews the patches"),
-    ("dev", "Developer", "writes the patches"),
+    ("admin", "Administrator"),
+    ("lead", "Leader"),
+    ("dev", "Developer"),
 )
 
-ROLE_LABELS = {key: label for key, label, _ in ROLES}
+# what a role does in a system: the leader assigns the work in the task
+# system and merges the patches in the review server, the developer takes the
+# work and pushes the patches
+ROLE_NOTES = {
+    "redmine": {
+        "admin": "the system manager, the highest rights",
+        "lead": "assigns the work to the developer",
+        "dev": "takes the work; the superagent helps",
+    },
+    "gerrit": {
+        "admin": "the system manager, the highest rights",
+        "lead": "reviews and merges the patches",
+        "dev": "pushes the patches",
+    },
+}
+
+ROLE_LABELS = {key: label for key, label in ROLES}
 
 
 def account(prefix, key):
@@ -104,8 +120,8 @@ def account(prefix, key):
     )
 
 
-REDMINE_ACCOUNTS = {key: account("REDMINE", key) for key, _, _ in ROLES}
-GERRIT_ACCOUNTS = {key: account("GERRIT", key) for key, _, _ in ROLES}
+REDMINE_ACCOUNTS = {key: account("REDMINE", key) for key, _ in ROLES}
+GERRIT_ACCOUNTS = {key: account("GERRIT", key) for key, _ in ROLES}
 
 
 def role_of(accounts, login):
@@ -404,8 +420,8 @@ def role_button(system, key, label, note, login, current):
 def system_card(system, title, subtitle, url, accounts, current):
     """One system of the page: its three roles and who is signed in."""
     buttons = "".join(
-        role_button(system, key, label, note, accounts[key][0], current)
-        for key, label, note in ROLES
+        role_button(system, key, label, ROLE_NOTES[system][key], accounts[key][0], current)
+        for key, label in ROLES
     )
     if current:
         state = (
