@@ -127,27 +127,41 @@ else
 fi
 
 # ===========================================================================
-# 2. the administrator is the project manager
+# 2. the three roles of the company
 # ===========================================================================
-PM_ID=$(redmine_user_id "${REDMINE_ADMIN_LOGIN}")
-if [ -n "$PM_ID" ]; then
-  pass "the PM account exists (login '${REDMINE_ADMIN_LOGIN}', id ${PM_ID})"
+ADMIN_ID=$(redmine_user_id "${REDMINE_ADMIN_LOGIN}")
+if [ -n "$ADMIN_ID" ]; then
+  pass "the administrator account exists (login '${REDMINE_ADMIN_LOGIN}', id ${ADMIN_ID})"
 else
-  fail "the PM account '${REDMINE_ADMIN_LOGIN}' is missing"
+  fail "the administrator account '${REDMINE_ADMIN_LOGIN}' is missing"
 fi
 
-redmine_api GET "/users/${PM_ID}.json" | python3 -c '
+redmine_api GET "/users/${ADMIN_ID}.json" | python3 -c '
 import json,sys
 firstname, lastname, mail = sys.argv[1], sys.argv[2], sys.argv[3]
 user = json.load(sys.stdin).get("user", {})
 ok = (user.get("firstname") == firstname and user.get("lastname") == lastname
       and user.get("mail") == mail and user.get("admin") is True)
 raise SystemExit(0 if ok else 1)
-' "${REDMINE_PM_FIRSTNAME}" "${REDMINE_PM_LASTNAME}" "${REDMINE_PM_MAIL}"
+' "${REDMINE_ADMIN_FIRSTNAME}" "${REDMINE_ADMIN_LASTNAME}" "${REDMINE_ADMIN_MAIL}"
 if [ $? -eq 0 ]; then
-  pass "the administrator is the project manager '${REDMINE_PM_FIRSTNAME} ${REDMINE_PM_LASTNAME}' <${REDMINE_PM_MAIL}>"
+  pass "the administrator is '${REDMINE_ADMIN_FIRSTNAME} ${REDMINE_ADMIN_LASTNAME}' <${REDMINE_ADMIN_MAIL}>"
 else
-  fail "the administrator has no PM display name (${REDMINE_PM_FIRSTNAME} ${REDMINE_PM_LASTNAME} <${REDMINE_PM_MAIL}>)"
+  fail "the administrator has no display name (${REDMINE_ADMIN_FIRSTNAME} ${REDMINE_ADMIN_LASTNAME} <${REDMINE_ADMIN_MAIL}>)"
+fi
+
+LEAD_ID=$(redmine_user_id "${REDMINE_LEAD_LOGIN}")
+if [ -n "$LEAD_ID" ]; then
+  pass "the leader account exists (login '${REDMINE_LEAD_LOGIN}', id ${LEAD_ID})"
+else
+  fail "the leader account '${REDMINE_LEAD_LOGIN}' is missing"
+fi
+
+# the leader assigns the work: its API key may open and close an issue
+if redmine_api_as "$REDMINE_LEAD_API_KEY" GET "/issues.json?assigned_to_id=me&status_id=open&limit=1" >/dev/null 2>&1; then
+  pass "the API key of the leader works"
+else
+  fail "the API key of the leader is refused"
 fi
 
 # ===========================================================================
@@ -227,11 +241,11 @@ fi
 # ===========================================================================
 for project in "${REDMINE_SDK_PROJECT}" "${REDMINE_SDK_CLI_PROJECT}"; do
   check_membership "$project" "$DEV_ID" "Developer" "dev"
-  check_membership "$project" "$PM_ID" "Manager" "the PM"
+  check_membership "$project" "$LEAD_ID" "Manager" "the leader"
 done
 
 # ===========================================================================
-# 7. the seeded issues: assigned to dev (the defects) / to the PM (negative)
+# 7. the seeded issues: assigned to dev (the defects) / to the leader (negative)
 # ===========================================================================
 SDK_PAGINATION_SUBJECT="Paginator drops the last page of a collection whose size is not a multiple of the page size"
 SDK_PAGINATION_ID=$(redmine_issue_id "${REDMINE_SDK_PROJECT}" "$SDK_PAGINATION_SUBJECT")
@@ -248,7 +262,7 @@ check_issue "${REDMINE_SDK_PROJECT}" "$SDK_PAGINATION_SUBJECT" "$DEV_ID" "dev"
 check_issue "${REDMINE_SDK_PROJECT}" "$SDK_RETRY_SUBJECT" "$DEV_ID" "dev"
 check_issue "${REDMINE_SDK_PROJECT}" "$SDK_AUTH_SUBJECT" "$DEV_ID" "dev"
 check_issue "${REDMINE_SDK_CLI_PROJECT}" "$CLI_TIMEOUT_SUBJECT" "$DEV_ID" "dev"
-check_issue "${REDMINE_SDK_PROJECT}" "$SDK_NEGATIVE_SUBJECT" "$PM_ID" "the PM (negative case)"
+check_issue "${REDMINE_SDK_PROJECT}" "$SDK_NEGATIVE_SUBJECT" "$LEAD_ID" "the leader (negative case)"
 
 # ===========================================================================
 # 8. the workbench list of the bound account is exactly the dev issues
@@ -277,9 +291,9 @@ for issue in json.load(sys.stdin).get("issues", []):
         sys.exit(1)
 ' "$SDK_NEGATIVE_ID"
 if [ $? -eq 0 ]; then
-  pass "the workbench list does not contain the issue assigned to the PM (negative case)"
+  pass "the workbench list does not contain the issue assigned to the leader (negative case)"
 else
-  fail "the workbench list contains the issue assigned to the PM (#${SDK_NEGATIVE_ID})"
+  fail "the workbench list contains the issue assigned to the leader (#${SDK_NEGATIVE_ID})"
 fi
 
 # ===========================================================================
@@ -396,12 +410,12 @@ fi
 # ===========================================================================
 # 14. a person can sign in to the web UI (kept from the initial environment)
 # ===========================================================================
-LOGIN_HEADERS=$(curl -sS -m 20 -D - -o /dev/null -u "${GERRIT_WEB_LOGIN}:${GERRIT_WEB_PASSWORD}" \
+LOGIN_HEADERS=$(curl -sS -m 20 -D - -o /dev/null -u "${GERRIT_LEAD_LOGIN}:${GERRIT_LEAD_PASSWORD}" \
   "${GERRIT_URL}/login" 2>/dev/null)
 if echo "$LOGIN_HEADERS" | grep -qi "^set-cookie: GerritAccount="; then
-  pass "the web account '${GERRIT_WEB_LOGIN}' signs in to the web UI"
+  pass "the leader '${GERRIT_LEAD_LOGIN}' signs in to the web UI"
 else
-  fail "the web account '${GERRIT_WEB_LOGIN}' cannot sign in to the web UI"
+  fail "the leader '${GERRIT_LEAD_LOGIN}' cannot sign in to the web UI"
 fi
 
 ANON_HEADERS=$(curl -sS -m 20 -D - -o /dev/null "${GERRIT_URL}/" 2>/dev/null)
@@ -411,11 +425,11 @@ else
   fail "the front end of the review server does not ask the browser for the credentials"
 fi
 
-if curl -sS -m 20 -u "${GERRIT_WEB_LOGIN}:${GERRIT_WEB_PASSWORD}" \
-  "${GERRIT_URL}/a/accounts/self/external.ids" 2>/dev/null | grep -q "gerrit:${GERRIT_WEB_LOGIN}"; then
-  pass "the web account carries the external id the HTTP mode looks the user up by"
+if curl -sS -m 20 -u "${GERRIT_LEAD_LOGIN}:${GERRIT_LEAD_PASSWORD}" \
+  "${GERRIT_URL}/a/accounts/self/external.ids" 2>/dev/null | grep -q "gerrit:${GERRIT_LEAD_LOGIN}"; then
+  pass "the leader carries the external id the HTTP mode looks the user up by"
 else
-  fail "the web account has no 'gerrit:${GERRIT_WEB_LOGIN}' external id and cannot be used in the browser"
+  fail "the leader has no 'gerrit:${GERRIT_LEAD_LOGIN}' external id and cannot be used in the browser"
 fi
 
 # ===========================================================================
@@ -490,7 +504,15 @@ raise SystemExit(0 if defect else 1)
 ') >/dev/null 2>&1; then
   pass "the pagination defect is present in the seeded SDK (200 of 250 items come back)"
 else
-  fail "the pagination defect is not present in the seeded SDK - the scenario was already fixed?"
+  # the superagent fixes the defect in the repository of the scenario, so after
+  # the first run it is gone: that is the demo, not an error
+  pagination_issue=$(redmine_issue_id "${REDMINE_SDK_PROJECT}" "$SDK_PAGINATION_SUBJECT")
+  pagination_state=$(redmine_api GET "/issues/${pagination_issue}.json" | python3 -c '
+import json,sys
+issue = json.load(sys.stdin).get("issue", {})
+print(issue.get("status", {}).get("name", ""))
+')
+  warn "the pagination defect is not in the seeded SDK any more: the superagent patched it (issue #${pagination_issue} is ${pagination_state})"
 fi
 
 if [ -d "${WORKDIR}/${REDMINE_SDK_CLI_PROJECT}" ] && \
@@ -522,8 +544,8 @@ push_issue_change() { # <project> <issue-id>
     cd "$dir" || exit 1
     git checkout -q "${GERRIT_BRANCH}" 2>/dev/null || git checkout -q -B "${GERRIT_BRANCH}"
     git clean -fdq
-    git config user.email "${GERRIT_AGENT_EMAIL}"
-    git config user.name "Super Agent"
+    git config user.email "${GERRIT_DEV_EMAIL}"
+    git config user.name "Zhang Wei"
     install_commit_msg_hook "$(git rev-parse --git-dir)"
     echo "# verification $(date +%s)" >> README.md
     git add -A
@@ -536,9 +558,9 @@ Temporary change pushed by verify.sh; it is abandoned again after the check."
   change_id=$(cd "$dir" && git log -1 --format=%B | sed -n 's/^Change-Id: //p')
   push_out=$(cd "$dir" && git push origin "HEAD:refs/for/${GERRIT_BRANCH}" 2>&1)
   if echo "$push_out" | grep -q "new reference"; then
-    pass "the agent can push to refs/for/${GERRIT_BRANCH} in '${project}'"
+    pass "the developer can push to refs/for/${GERRIT_BRANCH} in '${project}'"
   else
-    fail "the agent cannot push to refs/for/${GERRIT_BRANCH} in '${project}': ${push_out}"
+    fail "the developer cannot push to refs/for/${GERRIT_BRANCH} in '${project}': ${push_out}"
   fi
   if echo "$push_out" | grep -qE "#/c/${project}/\+/[0-9]+"; then
     pass "the push output of '${project}' contains the new UI change url"
@@ -571,7 +593,7 @@ if change.get("status") != "NEW":
 owner = change.get("owner") or {}
 if owner.get("username") != expected_owner:
     raise SystemExit(1)
-' "${project}" "${issue_id}" "${GERRIT_AGENT_LOGIN}"
+' "${project}" "${issue_id}" "${GERRIT_DEV_LOGIN}"
   if [ $? -eq 0 ]; then
     pass "change ${change_number} of '${project}' is NEW, belongs to the agent and is in the right project"
   else
@@ -603,6 +625,97 @@ sys.exit(0 if expected in message else 1)
 
 push_issue_change "${REDMINE_SDK_PROJECT}" "$SDK_PAGINATION_ID"
 push_issue_change "${REDMINE_SDK_CLI_PROJECT}" "$CLI_TIMEOUT_ID"
+
+# ===========================================================================
+# The flow of the company: the developer pushes a patch, the leader reviews it
+# and merges it, and the developer may not merge its own patch.
+# ===========================================================================
+echo
+echo "--- the flow of the company ---"
+
+FLOW_PROJECT="dsh-verify-flow"
+FLOW_DIR="${WORKDIR}/${FLOW_PROJECT}"
+
+# a scratch repository, so the check does not touch the repositories of the
+# scenario
+gerrit_api_code DELETE "/a/projects/${FLOW_PROJECT}" >/dev/null
+code=$(gerrit_api_code PUT "/a/projects/${FLOW_PROJECT}" '{"name":"dsh-verify-flow","description":"The check of verify.sh; it is deleted again."}')
+case "$code" in
+  200|201) pass "the scratch repository '${FLOW_PROJECT}' was created" ;;
+  *) fail "could not create the scratch repository '${FLOW_PROJECT}' (http $code)" ;;
+esac
+if git clone -q "ssh://${GERRIT_DEV_LOGIN}@${GERRIT_SSH_HOST}:${GERRIT_SSH_PORT}/${FLOW_PROJECT}" "$FLOW_DIR" 2>/dev/null; then
+  pass "the developer can clone the scratch repository"
+else
+  fail "the developer cannot clone the scratch repository"
+fi
+(
+  cd "$FLOW_DIR" || exit 1
+  git checkout -q -B "${GERRIT_BRANCH}"
+  git config user.email "${GERRIT_DEV_EMAIL}"
+  git config user.name "Zhang Wei"
+  install_commit_msg_hook "$(git rev-parse --git-dir)"
+  echo "# the flow of the company" > README.md
+  git add -A
+  git commit -q -m "The beginning of the scratch repository"
+)
+# the branch of a fresh repository does not exist yet
+git -C "$FLOW_DIR" push -q origin "HEAD:refs/heads/${GERRIT_BRANCH}" 2>/dev/null || true
+(
+  cd "$FLOW_DIR" || exit 1
+  echo "# the patch of the developer" >> README.md
+  git add -A
+  git commit -q -m "The flow of the company
+
+A patch of the developer, for the check of verify.sh."
+)
+flow_change_id=$(git -C "$FLOW_DIR" log -1 --format=%B | sed -n 's/^Change-Id: //p')
+flow_push=$(cd "$FLOW_DIR" && git push origin "HEAD:refs/for/${GERRIT_BRANCH}" 2>&1)
+if echo "$flow_push" | grep -q "new reference"; then
+  pass "the developer pushed a patch"
+else
+  fail "the developer could not push a patch: ${flow_push}"
+fi
+flow_change=$(gerrit_api GET "/a/changes/?q=change:${flow_change_id}" | gerrit_body | python3 -c '
+import json,sys
+changes = json.load(sys.stdin)
+print(changes[0].get("_number", "") if changes else "")
+')
+flow_revision=$(gerrit_api GET "/a/changes/${flow_change}/detail?o=CURRENT_REVISION" | gerrit_body | python3 -c '
+import json,sys
+print(json.load(sys.stdin).get("current_revision", ""))
+')
+if [ -z "$flow_revision" ]; then
+  fail "the patch of the developer cannot be read back"
+else
+  # the developer may not merge its own patch: Gerrit asks for a review
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -u "${GERRIT_DEV_LOGIN}:${GERRIT_DEV_PASSWORD}" \
+    -H 'Content-Type: application/json' -d '{}' "${GERRIT_URL}/a/changes/${flow_change}/submit")
+  if [ "$code" = "409" ]; then
+    pass "the developer may not merge its own patch (the leader has to review it)"
+  else
+    fail "the developer could merge its own patch (http $code)"
+  fi
+  # the leader reviews the patch and merges it
+  curl -sS -o /dev/null -X POST -u "${GERRIT_LEAD_LOGIN}:${GERRIT_LEAD_PASSWORD}" -H 'Content-Type: application/json' \
+    -d '{"reviewer":{"username":"'${GERRIT_LEAD_LOGIN}'"}}' "${GERRIT_URL}/a/changes/${flow_change}/revisions/${flow_revision}/review"
+  curl -sS -o /dev/null -X POST -u "${GERRIT_LEAD_LOGIN}:${GERRIT_LEAD_PASSWORD}" -H 'Content-Type: application/json' \
+    -d '{"labels":{"Code-Review":"+2"}}' "${GERRIT_URL}/a/changes/${flow_change}/revisions/${flow_revision}/review"
+  sleep 3
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -u "${GERRIT_LEAD_LOGIN}:${GERRIT_LEAD_PASSWORD}" \
+    -H 'Content-Type: application/json' -d '{}' "${GERRIT_URL}/a/changes/${flow_change}/submit")
+  if [ "$code" = "200" ]; then
+    pass "the leader reviewed the patch and merged it"
+  else
+    fail "the leader could not merge the patch (http $code)"
+  fi
+fi
+# the scratch repository leaves no trace
+if gerrit_api_code DELETE "/a/projects/${FLOW_PROJECT}" | grep -q "^20"; then
+  pass "the scratch repository was deleted again"
+else
+  fail "the scratch repository could not be deleted"
+fi
 
 # ===========================================================================
 # Result

@@ -4,12 +4,13 @@
 #
 #   * enables the REST web services (Administration > Settings > Authentication)
 #   * loads the default configuration data on a fresh database
-#   * gives the administrator the display name of the project manager ("Li Na",
-#     login stays `admin`)
-#   * creates the developer account `dev` or renames the old `agent` account to
-#     it.  `dev` is the person the superagent binds to: there is no separate
-#     superagent account.  The user id and the API key of the account survive
-#     the rename.
+#   * keeps the sessions long, so a person stays signed in while the demo runs
+#   * creates the three accounts of the company and pins their API keys:
+#       admin  the system manager: the highest rights, kept out of the tests
+#       lead   the leader: the project manager who assigns the work
+#       dev    the developer: the account the superagent binds to; there is no
+#              account of the agent's own.  Older revisions created it as
+#              `agent`; init.rb renames it once, keeping its user id and key.
 #
 # Everything is idempotent: running it again only re-applies the values.
 # ---------------------------------------------------------------------------
@@ -74,18 +75,37 @@ end
 Setting.rest_api_enabled = '1'
 log "rest_api_enabled = #{Setting.rest_api_enabled}"
 
-# --- administrator = project manager ---------------------------------------
+# --- sessions that do not expire while the demo runs ------------------------
+# A person signs in through the sign-in page; the session has to survive the
+# time between two looks at the task system.
+Setting.session_timeout = 60 * 24 * 30    # 30 days of inactivity
+Setting.session_expiration = 0 if Setting.respond_to?(:session_expiration=)  # and no absolute end
+log "session_timeout = #{Setting.session_timeout} minutes"
+
+# --- administrator = the system manager -------------------------------------
 admin_login     = ENV.fetch('REDMINE_ADMIN_LOGIN', 'admin')
 admin_password  = ENV.fetch('REDMINE_ADMIN_PASSWORD', 'admin12345')
 admin_api_key   = ENV.fetch('REDMINE_ADMIN_API_KEY', 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4')
-pm_firstname    = ENV.fetch('REDMINE_PM_FIRSTNAME', 'Li')
-pm_lastname     = ENV.fetch('REDMINE_PM_LASTNAME', 'Na')
-pm_mail         = ENV.fetch('REDMINE_PM_MAIL', 'li.na@example.com')
+admin_firstname = ENV.fetch('REDMINE_ADMIN_FIRSTNAME', 'System')
+admin_lastname  = ENV.fetch('REDMINE_ADMIN_LASTNAME', 'Administrator')
+admin_mail      = ENV.fetch('REDMINE_ADMIN_MAIL', 'admin@example.com')
 
-admin = ensure_user(admin_login, pm_firstname, pm_lastname, pm_mail, admin_password, true)
+admin = ensure_user(admin_login, admin_firstname, admin_lastname, admin_mail, admin_password, true)
 pin_api_key(admin, admin_api_key)
-log "administrator #{admin.login} is the project manager #{admin.name} <#{admin.mail}>"
+log "administrator #{admin.login} is #{admin.name} <#{admin.mail}>"
 log "WARN: the #{admin.login} account is an administrator; this is a mock environment" unless admin.admin
+
+# --- leader = the project manager -------------------------------------------
+lead_login     = ENV.fetch('REDMINE_LEAD_LOGIN', 'lead')
+lead_password  = ENV.fetch('REDMINE_LEAD_PASSWORD', 'lead12345')
+lead_api_key   = ENV.fetch('REDMINE_LEAD_API_KEY', '1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d')
+lead_firstname = ENV.fetch('REDMINE_LEAD_FIRSTNAME', 'Wang')
+lead_lastname  = ENV.fetch('REDMINE_LEAD_LASTNAME', 'Lei')
+lead_mail      = ENV.fetch('REDMINE_LEAD_MAIL', 'lead@example.com')
+
+lead = ensure_user(lead_login, lead_firstname, lead_lastname, lead_mail, lead_password, false)
+pin_api_key(lead, lead_api_key)
+log "leader #{lead.login} is #{lead.name} <#{lead.mail}> (user ##{lead.id})"
 
 # --- developer = the bound account ----------------------------------------
 dev_login    = ENV.fetch('REDMINE_DEV_LOGIN', 'dev')
@@ -117,3 +137,5 @@ pin_api_key(dev, dev_api_key)
 log "developer #{dev.login} is #{dev.name} <#{dev.mail}> (user ##{dev.id})"
 
 log 'redmine bootstrap finished'
+# The runner leaves the connection pool open; the container has to end on its own.
+exit 0

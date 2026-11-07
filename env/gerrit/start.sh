@@ -26,14 +26,18 @@ COOKIES=/tmp/gerrit-cookies.txt
 ADMIN_LOGIN="${GERRIT_ADMIN_LOGIN:-admin}"
 ADMIN_EMAIL="${GERRIT_ADMIN_EMAIL:-admin@example.com}"
 ADMIN_PASSWORD="${GERRIT_ADMIN_PASSWORD:-admin12345}"
-AGENT_LOGIN="${GERRIT_AGENT_LOGIN:-agent}"
-AGENT_EMAIL="${GERRIT_AGENT_EMAIL:-agent@example.com}"
-AGENT_PASSWORD="${GERRIT_AGENT_PASSWORD:-agent12345}"
-# The account a person signs in with in the web UI.  It is created by Gerrit's own
-# HTTP login flow, because that is the only way to give it the external id that
-# the HTTP authentication mode looks the user up by (see web_accounts below).
-WEB_LOGIN="${GERRIT_WEB_LOGIN:-alice}"
-WEB_PASSWORD="${GERRIT_WEB_PASSWORD:-alice12345}"
+# The developer: the account the superagent pushes the patches with.  It is
+# created over the REST API, which is enough for a push over SSH.
+DEV_LOGIN="${GERRIT_DEV_LOGIN:-dev}"
+DEV_EMAIL="${GERRIT_DEV_EMAIL:-dev@example.com}"
+DEV_PASSWORD="${GERRIT_DEV_PASSWORD:-dev12345}"
+# The leader: the account a person signs in with in the web UI to review and
+# merge the patches.  It is created by Gerrit's own HTTP login flow, because
+# that is the only way to give it the external id that the HTTP authentication
+# mode looks the user up by (see web_accounts below).
+LEAD_LOGIN="${GERRIT_LEAD_LOGIN:-lead}"
+LEAD_EMAIL="${GERRIT_LEAD_EMAIL:-lead@example.com}"
+LEAD_PASSWORD="${GERRIT_LEAD_PASSWORD:-lead12345}"
 CANONICAL_WEB_URL="${CANONICAL_WEB_URL:-http://localhost:8080/}"
 
 # public keys of the agent account
@@ -106,17 +110,17 @@ bootstrap() {
 
   # --- the agent account ---------------------------------------------------
   local agent_json code
-  agent_json=$(printf '{"name":"Super Agent","email":"%s","http_password":"%s","ssh_key":"%s"}' \
-    "$AGENT_EMAIL" "$AGENT_PASSWORD" "$(cat "${AGENT_PUBKEYS[0]}")")
+  agent_json=$(printf '{"name":"Zhang Wei","email":"%s","http_password":"%s","ssh_key":"%s"}' \
+    "$DEV_EMAIL" "$DEV_PASSWORD" "$(cat "${AGENT_PUBKEYS[0]}")")
   code=$(curl -sS -o /tmp/agent-create.out -w '%{http_code}' -X PUT \
     -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" \
     -H "Content-Type: application/json" -d "$agent_json" \
-    "${HTTP}/a/accounts/${AGENT_LOGIN}")
+    "${HTTP}/a/accounts/${DEV_LOGIN}")
   case "$code" in
-    200|201) log "agent account '${AGENT_LOGIN}' created" ;;
+    200|201) log "developer account '${DEV_LOGIN}' created" ;;
     409)
-      log "agent account '${AGENT_LOGIN}' exists, refreshing credentials"
-      set_password "${AGENT_LOGIN}" "$AGENT_PASSWORD" ;;
+      log "developer account '${DEV_LOGIN}' exists, refreshing credentials"
+      set_password "${DEV_LOGIN}" "$DEV_PASSWORD" ;;
     *) die "could not create the agent account (http $code): $(cat /tmp/agent-create.out)" ;;
   esac
 
@@ -128,7 +132,7 @@ bootstrap() {
     keycode=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
       -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" \
       -H "Content-Type: text/plain" --data-binary "@${pub}" \
-      "${HTTP}/a/accounts/${AGENT_LOGIN}/sshkeys")
+      "${HTTP}/a/accounts/${DEV_LOGIN}/sshkeys")
     case "$keycode" in
       200|201|204) log "ssh key registered: $(basename "$pub")" ;;
       409) log "ssh key already registered: $(basename "$pub")" ;;
@@ -136,17 +140,19 @@ bootstrap() {
     esac
   done
 
-  # the agent is a site administrator: it may create projects, push to the
-  # branches of its projects and open changes
+  # The developer may create projects and push; the leader reviews and merges.
+  # Both administer this mock company.
   local mcode
-  mcode=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT \
-    -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" \
-    "${HTTP}/a/groups/1/members/${AGENT_LOGIN}")
-  case "$mcode" in
-    200|201|204) log "agent added to the Administrators group" ;;
-    409) log "agent already is a member of the Administrators group" ;;
-    *) die "could not add the agent to the Administrators group (http $mcode)" ;;
-  esac
+  for member in "${DEV_LOGIN}" "${LEAD_LOGIN}"; do
+    mcode=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT \
+      -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" \
+      "${HTTP}/a/groups/1/members/${member}")
+    case "$mcode" in
+      200|201|204) log "'${member}' added to the Administrators group" ;;
+      409) log "'${member}' already is a member of the Administrators group" ;;
+      *) die "could not add '${member}' to the Administrators group (http $mcode)" ;;
+    esac
+  done
 
   # --- switch to real HTTP authentication ----------------------------------
   git config -f "$CFG" auth.type HTTP
@@ -157,7 +163,7 @@ bootstrap() {
   wait "$pid" 2>/dev/null || true
   rm -f "${SITE}"/db/*.lock.db 2>/dev/null || true
 
-  # the account a person uses in the web UI, created by Gerrit itself
+  # the leader's account, created by Gerrit itself
   web_accounts
 
   touch "$MARKER"
@@ -194,33 +200,34 @@ web_accounts() {
 
   # signing in creates the account with the external id the HTTP mode needs
   local code
-  code=$(curl -sS -o /dev/null -w '%{http_code}' -u "${WEB_LOGIN}:${WEB_PASSWORD}" "${HTTP}/login")
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -u "${LEAD_LOGIN}:${LEAD_PASSWORD}" "${HTTP}/login")
   case "$code" in
-    200|302|303) log "web account '${WEB_LOGIN}' signed in (the account now exists)" ;;
-    *) die "the web account '${WEB_LOGIN}' could not sign in (http $code)" ;;
+    200|302|303) log "the leader '${LEAD_LOGIN}' signed in (the account now exists)" ;;
+    *) die "the leader '${LEAD_LOGIN}' could not sign in (http $code)" ;;
   esac
 
   # the account has no password of its own yet: the HTTP login flow does not set
   # one, and the REST API checks the password of the account
   local id
   id=$(curl -fsS -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" \
-    "${HTTP}/a/accounts/?q=username:${WEB_LOGIN}" | sed -n 's/.*"_account_id": *\([0-9]*\).*/\1/p' | head -1)
-  [ -n "$id" ] || die "the web account '${WEB_LOGIN}' was not created"
-  log "web account id is ${id}"
+    "${HTTP}/a/accounts/?q=username:${LEAD_LOGIN}" | sed -n 's/.*"_account_id": *\([0-9]*\).*/\1/p' | head -1)
+  [ -n "$id" ] || die "the leader's account '${LEAD_LOGIN}' was not created"
+  log "the leader's account id is ${id}"
 
   curl -fsS -o /dev/null -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" -X PUT \
-    -H "Content-Type: application/json" -d "{\"http_password\":\"${WEB_PASSWORD}\"}" \
-    "${HTTP}/a/accounts/${id}/password.http" || die "could not set the password of the web account"
-  log "web account password set"
+    -H "Content-Type: application/json" -d "{\"http_password\":\"${LEAD_PASSWORD}\"}" \
+    "${HTTP}/a/accounts/${id}/password.http" || die "could not set the password of the leader's account"
+  log "the leader's password set"
 
-  # the person reviews changes in the web UI, so the account administers the site
+  # the leader reviews and merges the changes in the web UI, so the account
+  # administers the site
   local mcode
   mcode=$(curl -sS -o /dev/null -w '%{http_code}' -u "${ADMIN_LOGIN}:${ADMIN_PASSWORD}" -X PUT \
-    "${HTTP}/a/groups/1/members/${WEB_LOGIN}")
+    "${HTTP}/a/groups/1/members/${LEAD_LOGIN}")
   case "$mcode" in
-    200|201|204) log "web account added to the Administrators group" ;;
-    409) log "web account already is a member of the Administrators group" ;;
-    *) die "could not add the web account to the Administrators group (http $mcode)" ;;
+    200|201|204) log "the leader was added to the Administrators group" ;;
+    409) log "the leader already is a member of the Administrators group" ;;
+    *) die "could not add the leader to the Administrators group (http $mcode)" ;;
   esac
 
   log "stopping the web account instance ..."

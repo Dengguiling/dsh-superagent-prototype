@@ -9,6 +9,7 @@ A self contained Docker Compose stack that imitates the two systems the
 | **Gerrit** 2.15.13  | code review server        | <http://localhost:8080>      |
 | nginx 1.31  | the front end of the review server | <http://localhost:8080> |
 | PostgreSQL 13      | database behind Redmine   | not published (internal only) |
+| the sign-in page   | one click per role        | <http://localhost:3001>      |
 
 The stack is **real**, not mocked: Redmine is migrated, has a working REST API
 and real users, Gerrit is a real code review server with real SSH pushes,
@@ -40,6 +41,9 @@ docker compose ps         # wait until redmine/gerrit report "healthy"
 
 Both initialisations are idempotent — restarting the stack keeps them.
 
+The **sign-in page** comes with the stack: <http://localhost:3001> signs a
+person in with one click per role (see [The sign-in page](#2a-the-sign-in-page)).
+
 Stop / remove:
 
 ```bash
@@ -64,8 +68,10 @@ docker compose down -v       # stop and remove everything, including the data
 | Gerrit REST API          | `http://localhost:8080/a/...`          | `http://gerrit:8080/a/...` |
 | Gerrit SSH (git)         | `ssh://agent@localhost:29418/demo`     | `ssh://agent@gerrit:29418/demo` |
 | PostgreSQL               | –                                      | `postgres://redmine:redmine@pg:5432/redmine` |
+| the sign-in page         | `http://localhost:3001`                 | `http://signin:3000`       |
 
-Compose service names: `pg`, `redmine`, `redmine-init`, `gerrit`, `proxy`.
+Compose service names: `pg`, `redmine`, `redmine-init`, `gerrit`, `proxy`,
+`signin`.
 The compose network is called `dsh-superagent-env`.
 
 The Gerrit context path is **`/`** (not the Gerrit default `/gerrit/`), so the
@@ -104,6 +110,51 @@ browser keeps the refused credential and sends it again, and a *403* never asks
 for the credentials again. The front end therefore accepts only `alice` on the
 web UI: a browser that holds any other credential gets the challenge again and
 can sign in.
+
+---
+
+## 2a. The sign-in page
+
+**<http://localhost:3001>** — one page, one button per role, one click signs
+the person in and opens the system.
+
+```bash
+docker compose up -d signin     # starts the sign-in page (port 3001)
+```
+
+The page lists the two systems and, for each of them, the three roles of the
+environment — **administrator** (`admin`), **leader** (`lead`) and **developer**
+(`dev`) — and it shows which role is signed in for each system right now. A
+click on a role signs that role in and opens the system: Redmine goes to
+<http://localhost:3000>, the review server to <http://localhost:8080>. Signing
+in as another role **replaces** the session of that system.
+
+The sign-in does not expire on its own:
+
+| system | what the page stores | how it stays signed in |
+|--------|----------------------|------------------------|
+| Gerrit | the cookie `dsh_auth` = `Basic base64(user:password)` | the front end of the review server hands that credential over to Gerrit instead of asking the browser again (see [`gerrit/nginx.conf`](gerrit/nginx.conf)) |
+| Redmine | the cookie `_redmine_session` (the session of Redmine itself) | the service signs in against the login form of Redmine and hands its session cookie to the browser; the session of Redmine is long (30 days, see [`redmine/init.rb`](redmine/init.rb)) |
+
+The cookie `dsh_auth` carries the credential of the chosen role in base64 — a
+convenience of this local mock, **not a secret store**: anybody who can read
+the cookie of the browser can read the password of the account. The passwords
+of the environment are in [`.env`](.env) anyway.
+
+`GET /whoami` answers with the role that is signed in per system, read from the
+cookies of the browser (and it answers that nobody is signed in when there is
+no session):
+
+```console
+$ curl -s http://localhost:3001/whoami
+{
+  "redmine": { "signed_in": true, "role": "lead", "role_label": "Leader", "login": "lead" },
+  "gerrit":  { "signed_in": true, "role": "lead", "role_label": "Leader", "login": "lead" }
+}
+```
+
+The service is a small Python program of the standard library
+([`login/server.py`](login/server.py)) — no pip install, no build step.
 
 ---
 
@@ -416,6 +467,8 @@ env/
 │   └── start.sh             # gerrit site bootstrap + start (runs in the container)
 ├── redmine/
 │   └── init.rb              # redmine bootstrap (runs via `rails runner`)
+├── login/
+│   └── server.py            # the sign-in page (python, standard library only)
 ├── scripts/
 │   └── common.sh            # shared helpers of seed.sh / verify.sh
 └── keys/

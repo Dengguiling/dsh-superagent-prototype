@@ -7,6 +7,8 @@ name: dsh-superagent-env
 #   redmine       Redmine 4.2.10       – task tracker ("PMS") on :3000
 #   redmine-init  one-shot              – REST API enable + PM/dev API keys
 #   gerrit        Gerrit 2.15.13        – code review on :8080 / ssh :29418
+#   proxy         nginx                 – the front end of the review server
+#   signin        python:3.12-alpine    – the sign-in page on :3001
 #
 # The redmine-init service is a one-shot: it runs to completion and exits 0.
 # `docker compose up -d` therefore leaves a fully seeded, authenticated stack.
@@ -97,9 +99,15 @@ services:
       REDMINE_ADMIN_LOGIN: ${REDMINE_ADMIN_LOGIN}
       REDMINE_ADMIN_PASSWORD: ${REDMINE_ADMIN_PASSWORD}
       REDMINE_ADMIN_API_KEY: ${REDMINE_ADMIN_API_KEY}
-      REDMINE_PM_FIRSTNAME: ${REDMINE_PM_FIRSTNAME}
-      REDMINE_PM_LASTNAME: ${REDMINE_PM_LASTNAME}
-      REDMINE_PM_MAIL: ${REDMINE_PM_MAIL}
+      REDMINE_ADMIN_FIRSTNAME: ${REDMINE_ADMIN_FIRSTNAME}
+      REDMINE_ADMIN_LASTNAME: ${REDMINE_ADMIN_LASTNAME}
+      REDMINE_ADMIN_MAIL: ${REDMINE_ADMIN_MAIL}
+      REDMINE_LEAD_LOGIN: ${REDMINE_LEAD_LOGIN}
+      REDMINE_LEAD_PASSWORD: ${REDMINE_LEAD_PASSWORD}
+      REDMINE_LEAD_API_KEY: ${REDMINE_LEAD_API_KEY}
+      REDMINE_LEAD_FIRSTNAME: ${REDMINE_LEAD_FIRSTNAME}
+      REDMINE_LEAD_LASTNAME: ${REDMINE_LEAD_LASTNAME}
+      REDMINE_LEAD_MAIL: ${REDMINE_LEAD_MAIL}
       REDMINE_DEV_LOGIN: ${REDMINE_DEV_LOGIN}
       REDMINE_DEV_PASSWORD: ${REDMINE_DEV_PASSWORD}
       REDMINE_DEV_API_KEY: ${REDMINE_DEV_API_KEY}
@@ -125,9 +133,12 @@ services:
       GERRIT_ADMIN_LOGIN: ${GERRIT_ADMIN_LOGIN}
       GERRIT_ADMIN_EMAIL: ${GERRIT_ADMIN_EMAIL}
       GERRIT_ADMIN_PASSWORD: ${GERRIT_ADMIN_PASSWORD}
-      GERRIT_AGENT_LOGIN: ${GERRIT_AGENT_LOGIN}
-      GERRIT_AGENT_EMAIL: ${GERRIT_AGENT_EMAIL}
-      GERRIT_AGENT_PASSWORD: ${GERRIT_AGENT_PASSWORD}
+      GERRIT_DEV_LOGIN: ${GERRIT_DEV_LOGIN}
+      GERRIT_DEV_EMAIL: ${GERRIT_DEV_EMAIL}
+      GERRIT_DEV_PASSWORD: ${GERRIT_DEV_PASSWORD}
+      GERRIT_LEAD_LOGIN: ${GERRIT_LEAD_LOGIN}
+      GERRIT_LEAD_EMAIL: ${GERRIT_LEAD_EMAIL}
+      GERRIT_LEAD_PASSWORD: ${GERRIT_LEAD_PASSWORD}
     ports:
       - "${GERRIT_SSH_PORT}:29418"
     volumes:
@@ -170,10 +181,10 @@ services:
     # the accounts of the review server; the front end keeps the password files
     # of the web UI and of the API in sync with them (see gerrit/proxy-start.sh)
     environment:
-      GERRIT_WEB_LOGIN: ${GERRIT_WEB_LOGIN}
-      GERRIT_WEB_PASSWORD: ${GERRIT_WEB_PASSWORD}
-      GERRIT_AGENT_LOGIN: ${GERRIT_AGENT_LOGIN}
-      GERRIT_AGENT_PASSWORD: ${GERRIT_AGENT_PASSWORD}
+      GERRIT_LEAD_LOGIN: ${GERRIT_LEAD_LOGIN}
+      GERRIT_LEAD_PASSWORD: ${GERRIT_LEAD_PASSWORD}
+      GERRIT_DEV_LOGIN: ${GERRIT_DEV_LOGIN}
+      GERRIT_DEV_PASSWORD: ${GERRIT_DEV_PASSWORD}
       GERRIT_ADMIN_LOGIN: ${GERRIT_ADMIN_LOGIN}
       GERRIT_ADMIN_PASSWORD: ${GERRIT_ADMIN_PASSWORD}
     volumes:
@@ -192,6 +203,52 @@ services:
       timeout: 5s
       retries: 30
       start_period: 10s
+    networks: [dsh]
+
+  # ------------------------------------------------------------- signin --
+  # The sign-in page of the environment: one button per role, one click
+  # signs the person in and opens the system.  The service is a small
+  # Python program of the standard library (env/login/server.py).
+  #
+  #   Redmine  the service signs in against the login form of Redmine and
+  #            hands the session cookie `_redmine_session` to the browser.
+  #   Gerrit  the credential of the role is put into the cookie `dsh_auth`,
+  #            which the front end of the review server hands over to Gerrit
+  #            instead of asking the browser again (see gerrit/nginx.conf).
+  #
+  # The cookies ignore the port, so the ones the page sets are also sent to
+  # the two systems on the other ports of the host.
+  signin:
+    image: python:3.12-alpine
+    container_name: dsh-signin
+    restart: unless-stopped
+    depends_on:
+      redmine:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
+    ports:
+      - "${SIGNIN_PORT}:3000"
+    environment:
+      SIGNIN_PORT: "3000"
+      SIGNIN_REDMINE_URL: ${SIGNIN_REDMINE_URL}
+      SIGNIN_GERRIT_URL: ${SIGNIN_GERRIT_URL}
+      SIGNIN_REDMINE_INTERNAL_URL: ${SIGNIN_REDMINE_INTERNAL_URL}
+      REDMINE_ADMIN_LOGIN: ${REDMINE_ADMIN_LOGIN}
+      REDMINE_ADMIN_PASSWORD: ${REDMINE_ADMIN_PASSWORD}
+      REDMINE_LEAD_LOGIN: ${REDMINE_LEAD_LOGIN}
+      REDMINE_LEAD_PASSWORD: ${REDMINE_LEAD_PASSWORD}
+      REDMINE_DEV_LOGIN: ${REDMINE_DEV_LOGIN}
+      REDMINE_DEV_PASSWORD: ${REDMINE_DEV_PASSWORD}
+      GERRIT_ADMIN_LOGIN: ${GERRIT_ADMIN_LOGIN}
+      GERRIT_ADMIN_PASSWORD: ${GERRIT_ADMIN_PASSWORD}
+      GERRIT_LEAD_LOGIN: ${GERRIT_LEAD_LOGIN}
+      GERRIT_LEAD_PASSWORD: ${GERRIT_LEAD_PASSWORD}
+      GERRIT_DEV_LOGIN: ${GERRIT_DEV_LOGIN}
+      GERRIT_DEV_PASSWORD: ${GERRIT_DEV_PASSWORD}
+    volumes:
+      - ./login/server.py:/app/server.py:ro
+    command: ["python", "/app/server.py"]
     networks: [dsh]
 
 networks:

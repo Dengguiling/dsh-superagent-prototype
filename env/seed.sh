@@ -26,6 +26,10 @@ echo "=============================================================="
 # Redmine
 # ===========================================================================
 echo
+echo "--- the accounts of the company ---"
+"${ENV_DIR}/accounts.sh" || exit 1
+echo
+
 echo "--- Redmine ---"
 
 # --- lookup helpers --------------------------------------------------------
@@ -55,13 +59,13 @@ ROLE_MANAGER=$(redmine_id_of "/roles.json" name Manager)
 ROLE_DEVELOPER=$(redmine_id_of "/roles.json" name Developer)
 
 DEV_ID=$(redmine_user_id "${REDMINE_DEV_LOGIN}")
-PM_ID=$(redmine_user_id "${REDMINE_ADMIN_LOGIN}")
-if [ -z "$DEV_ID" ] || [ -z "$PM_ID" ]; then
-  echo "the Redmine accounts are missing (dev='${REDMINE_DEV_LOGIN}' pm='${REDMINE_ADMIN_LOGIN}')." >&2
+LEAD_ID=$(redmine_user_id "${REDMINE_LEAD_LOGIN}")
+if [ -z "$DEV_ID" ] || [ -z "$LEAD_ID" ]; then
+  echo "the Redmine accounts are missing (dev='${REDMINE_DEV_LOGIN}' lead='${REDMINE_LEAD_LOGIN}')." >&2
   echo "run 'docker compose up -d' first: the redmine-init job creates/renames them." >&2
   exit 1
 fi
-info "dev ${REDMINE_DEV_LOGIN} id=${DEV_ID}, PM ${REDMINE_ADMIN_LOGIN} id=${PM_ID}"
+info "dev ${REDMINE_DEV_LOGIN} id=${DEV_ID}, the leader ${REDMINE_LEAD_LOGIN} id=${LEAD_ID}"
 
 # all trackers of the installation: a project created through the API has none
 # until they are enabled, and without a tracker no issue can be created
@@ -130,9 +134,9 @@ ensure_project "${REDMINE_SDK_CLI_PROJECT}" "${REDMINE_SDK_CLI_PROJECT_NAME}" \
 
 ensure_membership "${REDMINE_PROJECT_ID}" "$DEV_ID" "$ROLE_DEVELOPER" "dev"
 ensure_membership "${REDMINE_SDK_PROJECT}" "$DEV_ID" "$ROLE_DEVELOPER" "dev"
-ensure_membership "${REDMINE_SDK_PROJECT}" "$PM_ID" "$ROLE_MANAGER" "PM"
+ensure_membership "${REDMINE_SDK_PROJECT}" "$LEAD_ID" "$ROLE_MANAGER" "the leader"
 ensure_membership "${REDMINE_SDK_CLI_PROJECT}" "$DEV_ID" "$ROLE_DEVELOPER" "dev"
-ensure_membership "${REDMINE_SDK_CLI_PROJECT}" "$PM_ID" "$ROLE_MANAGER" "PM"
+ensure_membership "${REDMINE_SDK_CLI_PROJECT}" "$LEAD_ID" "$ROLE_MANAGER" "the leader"
 
 # --- issues ----------------------------------------------------------------
 seed_issue() { # <project> <subject> <tracker> <priority> <assignee> <description>
@@ -141,6 +145,10 @@ seed_issue() { # <project> <subject> <tracker> <priority> <assignee> <descriptio
   existing=$(redmine_issue_id "$project" "$subject")
   if [ -n "$existing" ]; then
     info "issue already present: #${existing} ${subject}"
+    # the assignee is kept in shape: the leader assigns the work to the
+    # developer, the negative case stays with the leader
+    redmine_api_code_as "$REDMINE_LEAD_API_KEY" PUT "/issues/${existing}.json" \
+      "{\"issue\":{\"assigned_to_id\":${assignee}}}" >/dev/null
     return 0
   fi
   body=$(python3 -c '
@@ -153,7 +161,8 @@ print(json.dumps({"issue": {
     "priority_id": int(sys.argv[5]),
     "assigned_to_id": int(sys.argv[6]),
 }}))' "$project" "$subject" "$description" "$tracker" "$priority" "$assignee")
-  code=$(redmine_api_code POST "/issues.json" "$body")
+  # The leader authors the issue and hands it to the developer.
+  code=$(redmine_api_code_as "$REDMINE_LEAD_API_KEY" POST "/issues.json" "$body")
   case "$code" in
     201|200) ;;
     *) echo "could not create issue '${subject}' (http $code)" >&2; exit 1 ;;
@@ -282,7 +291,7 @@ EOF
 # --- the negative case: an issue that is NOT assigned to the bound account --
 seed_issue "${REDMINE_SDK_PROJECT}" \
   "Document the 1.0 migration guide of the demo SDK" \
-  "${TRACKER_FEATURE}" "${PRIO_LOW}" "${PM_ID}" \
+  "${TRACKER_FEATURE}" "${PRIO_LOW}" "${LEAD_ID}" \
   "$(cat <<'EOF'
 h3. Goal
 
@@ -327,10 +336,10 @@ echo "--- Gerrit ---"
 # --- the agent must be able to push to the branches of the projects --------
 ensure_agent_administrator() {
   local code
-  code=$(gerrit_api_code PUT "/a/groups/1/members/${GERRIT_AGENT_LOGIN}")
+  code=$(gerrit_api_code PUT "/a/groups/1/members/${GERRIT_DEV_LOGIN}")
   case "$code" in
-    200|201|204) info "agent is a member of the Administrators group" ;;
-    409) info "agent already is a member of the Administrators group" ;;
+    200|201|204) info "the developer is a member of the Administrators group" ;;
+    409) info "the developer already is a member of the Administrators group" ;;
     *) echo "could not add the agent to the Administrators group (http $code)" >&2; exit 1 ;;
   esac
 }
@@ -364,7 +373,7 @@ seed_gerrit_repo() { # <project> <source-dir> <commit-subject> <commit-body>
     (
       cd "${work}/${project}"
       git checkout -q -B "${GERRIT_BRANCH}"
-      git config user.email "${GERRIT_AGENT_EMAIL}"
+      git config user.email "${GERRIT_DEV_EMAIL}"
       git config user.name "Super Agent"
       install_commit_msg_hook "$(git rev-parse --git-dir)"
       cp -R "${source}/." .
@@ -424,7 +433,7 @@ issues = json.load(sys.stdin).get("issues", [])
 if not issues:
     print("    (none)")
 for issue in issues:
-    print("    #%-4s %-10s %s" % (issue["id"], issue.get("project", {}).get("identifier", "?"), issue["subject"]))
+    print("    #%-4s %-10s %s" % (issue["id"], issue.get("project", {}).get("name", "?"), issue["subject"]))
 '
 echo
 echo "  Gerrit repositories"

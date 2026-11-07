@@ -14,7 +14,7 @@ set +a
 REDMINE_URL="http://localhost:${REDMINE_PORT}"
 GERRIT_URL="http://localhost:${GERRIT_HTTP_PORT}"
 
-GERRIT_SSH_USER="${GERRIT_AGENT_LOGIN}"
+GERRIT_SSH_USER="${GERRIT_DEV_LOGIN}"
 GERRIT_SSH_HOST="localhost"
 GERRIT_SSH_URL="ssh://${GERRIT_SSH_USER}@${GERRIT_SSH_HOST}:${GERRIT_SSH_PORT}"
 GERRIT_PROJECT_SSH_URL="${GERRIT_SSH_URL}/${GERRIT_PROJECT}"
@@ -112,6 +112,20 @@ redmine_api_code() { # <method> <path> [json-body]
   else
     curl -sS -o /dev/null -w '%{http_code}' -X "$method" \
       -H "X-Redmine-API-Key: ${REDMINE_ADMIN_API_KEY}" "${REDMINE_URL}${path}"
+  fi
+}
+
+# The same call with the API key of a role: the leader authors the issues, the
+# developer answers on them.
+redmine_api_code_as() { # <api-key> <method> <path> [json-body]
+  local key="$1" method="$2" path="$3" body="${4:-}"
+  if [ -n "$body" ]; then
+    curl -sS -o /dev/null -w '%{http_code}' -X "$method" \
+      -H "X-Redmine-API-Key: ${key}" \
+      -H 'Content-Type: application/json' -d "$body" "${REDMINE_URL}${path}"
+  else
+    curl -sS -o /dev/null -w '%{http_code}' -X "$method" \
+      -H "X-Redmine-API-Key: ${key}" "${REDMINE_URL}${path}"
   fi
 }
 
