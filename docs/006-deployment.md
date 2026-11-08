@@ -85,10 +85,12 @@ The service is `env/login/server.py`, a program of the Python standard library. 
 
 | System | What the page stores | How the session lasts |
 | --- | --- | --- |
-| Gerrit | the cookie `dsh_auth`, the credential of the role in base64 | the front end of the review server, `env/gerrit/nginx.conf`, hands that credential over to Gerrit instead of challenging the browser |
+| Gerrit | the cookies `dsh_auth` (the login of the role) and `dsh_web` (the identity the browser is recognised by) | the front end of the review server, `env/gerrit/nginx.conf`, hands those credentials over to Gerrit instead of challenging the browser |
 | Redmine | the cookie `_redmine_session`, the session of Redmine itself | the service signs in against the login form of Redmine and hands its session cookie to the browser; the session of Redmine lasts 30 days |
 
-The cookie `dsh_auth` carries the credential of the role in base64: a convenience of this local mock, not a secret store. `GET /whoami` answers with the role that is signed in per system.
+The review server needs two credentials, because Gerrit looks an account up in two ways: its API takes the login, while its web UI takes the external id `gerrit:<login>`, which only the accounts that Gerrit's own login flow created carry; the other accounts are recognised in the browser by their e-mail address. The sign-in page asks Gerrit which of the two it accepts and stores the answer, so the web UI of the review server answers for every role.
+
+The cookies carry the credential of the role in base64: a convenience of this local mock, not a secret store. `GET /whoami` answers with the role that is signed in per system.
 
 ### Feishu bot (optional)
 

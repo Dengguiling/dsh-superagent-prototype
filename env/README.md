@@ -137,13 +137,22 @@ The sign-in does not expire on its own:
 
 | system | what the page stores | how it stays signed in |
 |--------|----------------------|------------------------|
-| Gerrit | the cookie `dsh_auth` = `Basic base64(user:password)` | the front end of the review server hands that credential over to Gerrit instead of asking the browser again (see [`gerrit/nginx.conf`](gerrit/nginx.conf)) |
+| Gerrit | the cookies `dsh_auth` = `Basic base64(login:password)` and `dsh_web` = `Basic base64(identity:password)` | the front end of the review server hands the credential over to Gerrit instead of asking the browser again (see [`gerrit/nginx.conf`](gerrit/nginx.conf)) |
 | Redmine | the cookie `_redmine_session` (the session of Redmine itself) | the service signs in against the login form of Redmine and hands its session cookie to the browser; the session of Redmine is long (30 days, see [`redmine/init.rb`](redmine/init.rb)) |
 
-The cookie `dsh_auth` carries the credential of the chosen role in base64 — a
-convenience of this local mock, **not a secret store**: anybody who can read
-the cookie of the browser can read the password of the account. The passwords
-of the environment are in [`.env`](.env) anyway.
+The review server gets two cookies, because Gerrit looks an account up in two
+different ways: its API takes the **login** (`dsh_auth`), while its web UI
+takes the external id `gerrit:<login>`, which only the accounts that Gerrit's
+own login flow created carry. The other accounts are recognised in the browser
+by their **e-mail address**, so `dsh_web` carries that one — the sign-in page
+asks Gerrit which of the two it accepts and stores the answer. Without the
+second cookie the web UI of the review server answers *"403 — not authorized"*
+for the developer and the administrator.
+
+The cookies carry the credential of the chosen role in base64 — a convenience
+of this local mock, **not a secret store**: anybody who can read the cookie of
+the browser can read the password of the account. The passwords of the
+environment are in [`.env`](.env) anyway.
 
 `GET /whoami` answers with the role that is signed in per system, read from the
 cookies of the browser (and it answers that nobody is signed in when there is

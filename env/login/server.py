@@ -81,6 +81,9 @@ MAX_AGE = 60 * 60 * 24 * 30
 # the addresses the browser uses ...
 REDMINE_URL = setting("SIGNIN_REDMINE_URL", "http://localhost:3000").rstrip("/")
 GERRIT_URL = setting("SIGNIN_GERRIT_URL", "http://localhost:8080").rstrip("/")
+# The address of the review server inside the compose network; the probe asks
+# Gerrit itself whether it recognises an account in the browser.
+GERRIT_INTERNAL = setting("SIGNIN_GERRIT_INTERNAL_URL", "http://gerrit:8080").rstrip("/")
 # ... and the ones the service uses inside the compose network
 REDMINE_INTERNAL = setting("SIGNIN_REDMINE_INTERNAL_URL", "http://redmine:3000").rstrip("/")
 
@@ -112,11 +115,12 @@ ROLE_LABELS = {key: label for key, label in ROLES}
 
 
 def account(prefix, key):
-    """The login and the password of a role, from the environment."""
+    """The login, the password and the e-mail of a role, from the environment."""
     name = key.upper()
     return (
         setting(f"{prefix}_{name}_LOGIN"),
         setting(f"{prefix}_{name}_PASSWORD"),
+        setting(f"{prefix}_{name}_EMAIL"),
     )
 
 
@@ -126,10 +130,69 @@ GERRIT_ACCOUNTS = {key: account("GERRIT", key) for key, _ in ROLES}
 
 def role_of(accounts, login):
     """The role of a login, or None when the login is not one of them."""
-    for key, (name, _password) in accounts.items():
+    if not login:
+        return None
+    for key, (name, _password, _mail) in accounts.items():
         if name and name == login:
             return key
+    # Gerrit identifies an account in the browser by its e-mail address, when
+    # the account carries no external id of its own (see gerrit_credential).
+    for key, (name, _password, mail) in accounts.items():
+        if mail and mail == login:
+            return key
     return None
+
+
+# ---------------------------------------------------------------------------
+# the credential the browser uses at the review server
+# ---------------------------------------------------------------------------
+
+# Gerrit 2.15 in "auth.type = HTTP" mode takes the identity from the request
+# and looks the account up by the external id "gerrit:<login>".  Only the
+# accounts that its own login flow created carry that id, so only they are
+# recognised in the browser by their login; the other accounts are recognised
+# by their e-mail address.  The cookie carries the credential that the browser
+# is recognised by, and the front end hands it over (see gerrit/nginx.conf).
+GERRIT_CREDENTIALS = {}
+
+
+def gerrit_credential(login, password, mail):
+    """The credential the browser uses for a Gerrit account.
+
+    The answer of the login page tells whether Gerrit recognised the account:
+    it sends a browser that is signed in away from the login page, and refuses
+    one that it could not look up.
+    """
+    key = f"{login}:{password}"
+    if key not in GERRIT_CREDENTIALS:
+        GERRIT_CREDENTIALS[key] = _probe_gerrit(login, password, mail)
+    return GERRIT_CREDENTIALS[key]
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Keeps the answer of the redirect, so the probe sees its status."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _probe_gerrit(login, password, mail):
+    request = urllib.request.Request(f"{GERRIT_INTERNAL}/login/")
+    request.add_header("Authorization", "Basic " + base64.b64encode(f"{login}:{password}".encode()).decode())
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        with opener.open(request, timeout=15) as answer:
+            code = answer.status
+    except urllib.error.HTTPError as error:
+        code = error.code
+    except OSError:
+        # the review server did not answer: keep the credential of the login
+        return f"{login}:{password}"
+    if code in (200, 301, 302, 303, 307, 308):
+        return f"{login}:{password}"
+    # Gerrit could not look the account up by its login: the browser uses the
+    # e-mail address, which Gerrit accepts as the identity of the account.
+    return f"{mail}:{password}" if mail else f"{login}:{password}"
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +444,7 @@ PAGE = string.Template(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in - dsh-superagent environment</title>
+<link rel="icon" href="data:,">
 <style>$style</style>
 </head>
 <body>
@@ -635,6 +699,19 @@ class SignIn(BaseHTTPRequestHandler):
 
     # -- the sign-in --------------------------------------------------------
 
+    def system_url(self, base):
+        """The address of a system, on the host the person used.
+
+        A cookie belongs to its host, and the browser sends it to every port of
+        that host.  The sign-in therefore opens the system on the very host the
+        page was opened with, so the cookie of the sign-in is sent there.
+        """
+        parsed = urllib.parse.urlparse(base)
+        host = (self.headers.get("Host") or "").split(":")[0]
+        if not host:
+            return base
+        return f"{parsed.scheme}://{host}:{parsed.port}"
+
     def signin_gerrit(self, role):
         """Sign in at the review server.
 
@@ -646,15 +723,25 @@ class SignIn(BaseHTTPRequestHandler):
         if not account or not account[0]:
             self.send_html(404, render_page(self.state(), f"Unknown role: {role}"))
             return
-        login, password = account
+        login, password, mail = account
+        # Two cookies: the credential of the role for the API of the review
+        # server, and the credential the browser is recognised by for its web
+        # UI (see gerrit/nginx.conf).
         value = "Basic " + base64.b64encode(f"{login}:{password}".encode()).decode()
+        browser = "Basic " + base64.b64encode(
+            gerrit_credential(login, password, mail).encode()
+        ).decode()
         self.redirect(
-            GERRIT_URL + "/",
+            self.system_url(GERRIT_URL) + "/",
             headers=[
                 (
                     "Set-Cookie",
                     f"dsh_auth={value}; Path=/; Max-Age={MAX_AGE}; HttpOnly; SameSite=Lax",
-                )
+                ),
+                (
+                    "Set-Cookie",
+                    f"dsh_web={browser}; Path=/; Max-Age={MAX_AGE}; HttpOnly; SameSite=Lax",
+                ),
             ],
         )
 
@@ -669,7 +756,7 @@ class SignIn(BaseHTTPRequestHandler):
         if not account or not account[0]:
             self.send_html(404, render_page(self.state(), f"Unknown role: {role}"))
             return
-        login, password = account
+        login, password, _mail = account
         try:
             session = redmine_sign_in(login, password)
         except RuntimeError as exc:
@@ -679,7 +766,7 @@ class SignIn(BaseHTTPRequestHandler):
             )
             return
         self.redirect(
-            REDMINE_URL + "/",
+            self.system_url(REDMINE_URL) + "/",
             headers=[
                 (
                     "Set-Cookie",
@@ -692,7 +779,7 @@ class SignIn(BaseHTTPRequestHandler):
         """Forget the session of a system."""
         names = {
             "redmine": ["_redmine_session"],
-            "gerrit": ["dsh_auth"],
+            "gerrit": ["dsh_auth", "dsh_web"],
         }.get(system, ["_redmine_session", "dsh_auth"])
         headers = [
             ("Set-Cookie", f"{name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
