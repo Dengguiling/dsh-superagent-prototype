@@ -82,7 +82,8 @@ export function DecisionLine({ decision }: { decision: DecisionRow }) {
   const preview = readableMarkers(t, decision.preview)
   const reason = decision.reason ? reasonLabel(t, decision.reason) : ''
   const open = () => decision.ticketId ? navigate({ page: 'execution', id: decision.ticketId })
-    : navigate({ page: 'trigger', id: decision.thread, query: { trigger: decision.triggerIds[0] ?? '' } })
+    // The Trigger is named only when the Decision holds one, so the link carries no empty `?trigger=`.
+    : navigate({ page: 'trigger', id: decision.thread, ...decision.triggerIds[0] ? { query: { trigger: decision.triggerIds[0] } } : {} })
   return <li className="dt-row dt-link dt-ticket">
     <div className="dt-ticket-stage"><StageMark state={mark.dot} icon={mark.icon} label={mark.label} /></div>
     <div className="dt-ticket-body">

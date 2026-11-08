@@ -82,7 +82,8 @@ function MandateDetails({ ticket, actor }: { ticket: TicketPageView; actor: stri
   const direction = decision?.direction
   const rows: [string, ReactNode][] = decision ? [
     [t('term.trigger'), <button type="button" className="dt-trigger-link" onClick={() => navigate({ page: 'trigger', id: decision.thread,
-      query: { trigger: decision.triggerIds[0] ?? '' } })}>
+      // The Trigger is named only when the Decision holds one, so the link carries no empty `?trigger=`.
+      ...decision.triggerIds[0] ? { query: { trigger: decision.triggerIds[0] } } : {} })}>
       <span className="dt-trigger-text">{readableMarkers(t, decision.preview) || t('empty')}</span>
       <span className="dt-row-meta"><span>{valueLabel(t, 'source', mandate.actor.source)} · {actor}</span><When at={decision.at} /></span>
     </button>],

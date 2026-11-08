@@ -15,7 +15,7 @@ export interface TimelinePlace { at: string; id: string }
 /** Why a message was dropped: its conversation can never receive it (`channelGone`), or its Source no longer listens to it (`channelIgnored`). */
 export type DropReason = 'channelGone' | 'channelIgnored'
 /** Outbound message receipt tracked in the outbox from the moment it is queued (`pending`, `sent`, or `dropped`); delivery attempt counts live on its `reply` effect. */
-export interface Receipt extends OutboundMessage { status: ReplyStatus; dropped?: { at: string; reason: DropReason } }
+export interface Receipt extends OutboundMessage { status: ReplyStatus; dropped?: { at: string; reason: DropReason }; settledAt?: string }
 /** A dropped outbound message receipt, with the timestamp and reason it was dropped. */
 export type Dropped = Receipt & { dropped: { at: string; reason: DropReason } }
 /** Saved settings snapshot with the policy version and ticket notifications it produced (`internal` saves have no origin). */
@@ -38,9 +38,11 @@ const SETS: Record<string, Record<string, string>> = {
     active: "INTEGER AS (CASE WHEN json_array_length(value, '$.pending') > 0 OR value -> '$.evaluating' IS NOT NULL THEN 1 END)",
     subscribed: "TEXT AS (CASE WHEN json_array_length(value, '$.subscriptions') > 0 THEN value ->> '$.ref.source' END)",
   },
-  // Composite key (ticketId + thread) used to preserve per-conversation reply order.
-  outbox: { dropped: "TEXT AS (value ->> '$.dropped.at')", pending: `TEXT AS (CASE WHEN value ->> '$.status' = 'pending'
-    AND value ->> '$.ticketId' IS NOT NULL THEN (value ->> '$.ticketId') || ' ' || (value ->> '$.channel.thread') END)` },
+  // Composite key (ticketId + thread) used to preserve per-conversation reply order, and the time a receipt settled
+  // (receipts settled by this build carry `settledAt`; older ones fall back to their drop time), which the retention prune reads.
+  outbox: { dropped: "TEXT AS (value ->> '$.dropped.at')", settled: `TEXT AS (COALESCE(value ->> '$.settledAt', value ->> '$.dropped.at'))`,
+    pending: `TEXT AS (CASE WHEN value ->> '$.status' = 'pending'
+      AND value ->> '$.ticketId' IS NOT NULL THEN (value ->> '$.ticketId') || ' ' || (value ->> '$.channel.thread') END)` },
 }
 export { SCHEMA_VERSION }
 /**
@@ -251,7 +253,7 @@ export class Store implements Repositories {
   /** Read-only queries for management views, orchestrator tools, and source polling (see `storeReads`). */
   readonly read: ReturnType<typeof storeReads>
 
-  /** Delivery status of a queued message; receipts are retained permanently so message IDs are idempotent. */
+  /** Delivery status of a queued message; settled receipts are pruned after 30 days, so a much older message ID can be recorded and sent again. */
   replyStatus(id: string): ReplyStatus | undefined { return this.receipts.get(id)?.status }
   /** Outbox message receipts for channel delivery; only `Outbox` writes to `receipts`. */
   readonly receipts = {
@@ -272,10 +274,13 @@ export class Store implements Repositories {
     },
     /**
      * Marks a pending receipt as sent or dropped (with drop reason and timestamp), recreating the receipt if the message
-     * was withdrawn while being sent so its ID cannot be queued again.
+     * was withdrawn while being sent so its ID cannot be queued again. Settled receipts also record `settledAt`, which
+     * the retention prune reads.
      */
     settle: (message: OutboundMessage, outcome: 'sent' | DropReason): void => {
-      const settled = outcome === 'sent' ? { status: 'sent' } : { status: 'dropped', dropped: { at: new Date().toISOString(), reason: outcome } }
+      const settledAt = new Date().toISOString()
+      const settled = outcome === 'sent' ? { status: 'sent', settledAt }
+        : { status: 'dropped', dropped: { at: settledAt, reason: outcome }, settledAt }
       const { id, channel, text, kind, ticketId } = message
       const updated = this.db.prepare("UPDATE outbox SET value = json_patch(value, ?) WHERE id = ? AND value ->> '$.status' = 'pending'")
         .run(JSON.stringify(settled), id)
@@ -288,6 +293,13 @@ export class Store implements Repositories {
      */
     withdraw: (id: string): boolean =>
       Number(this.db.prepare("DELETE FROM outbox WHERE id = ? AND value ->> '$.status' = 'pending'").run(id).changes) > 0,
+    /**
+     * Deletes receipts that settled before `before`; pending ones and the settled receipts of the last 30 days stay, so
+     * message IDs stay idempotent over any realistic retry window. The Runtime schedules this once a day.
+     * @returns How many receipts were deleted.
+     */
+    prune: (before: string): number =>
+      Number(this.db.prepare('DELETE FROM outbox WHERE settled IS NOT NULL AND settled < ?').run(before).changes),
   }
 }
 export { key, threadKey }

@@ -24,7 +24,7 @@ The panel has three destinations, and each opens one page: **任务工作台** (
 | 执行 Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, Working, Waiting for a Trigger or Ended. Ticket details show actions, authorization, waiting Inputs, Subscriptions and Assignments |
 | 设置 Settings | Sources, Eval, Execution, Prompts and Deployment. Each group includes its save history |
 
-The panel has three destinations, and each opens one page: **任务工作台** (the task inbox), **流水线** (the flow) and **设置**. None of them carries a row of tabs. The task inbox says which tasks wait for a person, so a second list beside it would only repeat itself; the flow page says where the work is, so its chart is the map and the section a station names appears below it.
+The task inbox says which tasks wait for a person, so a second list beside it would only repeat itself; the flow page says where the work is, so its chart is the map and the section a station names appears below it.
 
 The page follows the browser: the column takes the width it is given, with 16 to 32 pixels of margin on each side, so the work in the middle fills the window instead of sitting in a narrow column with wide margins.
 
@@ -45,27 +45,25 @@ Above every page stands the rail, which answers the first two questions at a gla
 
 The Inbox is the operator's task inbox: the task system's issues assigned to the bound account. Its filters are the states a task stands in and never overlap — **等你处理** (the Ticket waits for a person), **处理中** (the agent holds it), **未处理** (the route declined it, with its reason) and **已归档** (the operator's own list). Every row carries the state anyway, so the filter and the row never disagree.
 
-It is the panel's first page, and the rail's **等你处理** count opens its 等你处理 filter — the count is the number of tasks in that list, so the two can never disagree. The Tickets themselves are listed in the 执行 section of the flow page, which is where the work of the agent is.
-
-The pipeline chart, on the 流水线 page, has seven stations, 来源 → 触发 → 评估中 → 工单 → 执行中 → 等人 → 完成. Each station says **what it counts** and **the window it covers**, because the stations measure different things and their numbers are not comparable: the 来源 the panel listens to, the 会话 the Triggers became, the 会话 under evaluation, the 工单 that are open, the 工单 the agent is working on, the 工单 that need a person, and the 工单 ended in the last 24 hours. Its head carries the legend **进行中**、**等人**、**已完成** and **更新于 现在**; the connectors between stations animate while the upstream station has work and processing runs.
-
-Every station opens the section that holds the work it counts, and the section appears below the chart — the chart stays where it is, and the name of the station is the name of the section: **来源** the Sources, **触发** the Threads, **评估中** the Threads under evaluation, and **工单**、**执行中**、**等人** and **完成** the Tickets. The number on a station is the number of rows the section below it lists, so the two can be checked against each other. The 触发 section says how many Threads it holds, the number the chart shows, so the two can be checked against each other. The sections are reached from anywhere with ⌘K, which lists each of them.
-
-Below the chart and its section, the system problems — a setup that failed, a Source that is down, an Eval that never decided, a message that keeps failing — each with the step that fixes it.
-
-### The workbench
-
-The workbench is the operator's task inbox. It lists the task system's issues assigned to the bound account — the work the agent takes — as **待处理** (waiting for the judgement, worked on, or waiting for the person), **未处理** (the route judged the task and did not take it, with the reason it gave) and **已归档** (the operator's own list), each row showing its id, its project, its status and the state the task stands in. A row the agent holds a Ticket for is marked with the Ticket. **归档** moves a task out of 待处理, **删除** hides it from every list, and both change only what the workbench shows: the task system is untouched, and a Ticket that works on the task continues.
+Each row shows the task's id, its project, its status and the state the task stands in, and a row the agent holds a Ticket for is marked with the Ticket. **归档** moves a task into 已归档, **删除** hides it from every list, and both change only what the workbench shows: the task system is untouched, and a Ticket that works on the task continues.
 
 The state of a task comes from what the agent did with it: a task nobody judged yet is **待分析**, a task the route declined is **未处理**, a task with an open Ticket is **分析中** or **等你处理** (the Ticket waits for a person), and a finished Ticket is **已完成**. The state is read from the Ticket the agent holds and from the last decision of the issue's thread, so it says why a task was not taken.
 
-The page opens the first task of the current view by itself, so coming back to it costs no click; changing the filter opens the first task of that view. A task the operator closed stays closed, so the list can be read on its own.
+It is the panel's first page, and the rail's **等你处理** count opens its 等你处理 filter — the count is the number of tasks in that list, so the two can never disagree. The page opens the first task of the current view by itself, so coming back to it costs no click; changing the filter opens the first task of that view. A task the operator closed stays closed, so the list can be read on its own. The Tickets themselves are listed in the 执行 section of the flow page, which is where the work of the agent is.
 
 Selecting a task opens the conversation about it: the issue's description and journals, rendered as Markdown rather than as its source, with their authors and times. It reads like a chat: the agent speaks on the left, the people on the issue and the operator on the right, so the exchange is easy to follow. The head shows the task's project, status and assignee, and the one link into the task system — no message carries a link of its own.
 
 The messages sit in a well of their own — a ground deeper than the surface around them, with a hairline at its edge — so a long exchange reads as one box that scrolls, not as text floating on the page. The bubble of a message takes a little of the theme's own text colour, so it reads as a bubble in the dark theme and in the light one alike.
 
 The conversation is a box of its own, with its own scroll: the head, and with it the link into the task system, stays where it is while the messages scroll, and the reply box stays at the bottom of the box. The task inbox fills the page, so nothing above the conversation ever moves out of reach. A Ticket the agent holds shows its stage, its change and a button that opens the agent's Session. The task's own state is on its row in the list, so the detail does not repeat it; only where the list is out of sight — a narrow window — does the detail say the state itself. The composer sends a reply as a note on the issue, and the Source delivers it to the agent at once, so the work continues without waiting for the next poll; when that hand-off fails, the note stays a note and the Source delivers it on the next poll, so an instruction is never lost. Because the agent and the operator may share one account, the Source tells its own notes and the panel's notes from a person's by the markers they carry: on a shared account the operator's unmarked notes are human input.
+
+### The flow chart
+
+The pipeline chart, on the 流水线 page, has seven stations, 来源 → 触发 → 评估中 → 工单 → 执行中 → 等人 → 完成. Each station says **what it counts** and **the window it covers**, because the stations measure different things and their numbers are not comparable: the 来源 the panel listens to, the 会话 the Triggers became, the 会话 under evaluation, the 工单 that are open, the 工单 the agent is working on, the 工单 that need a person, and the 工单 ended in the last 24 hours. Its head carries the legend **进行中**、**等人**、**已完成** and **更新于 现在**; the connectors between stations animate while the upstream station has work and processing runs.
+
+Every station opens the section that holds the work it counts, and the section appears below the chart — the chart stays where it is, and the name of the station is the name of the section: **来源** the Sources, **触发** the Threads, **评估中** the Threads under evaluation, and **工单**、**执行中**、**等人** and **完成** the Tickets. The number on a station is the number of rows the section below it lists, so the two can be checked against each other. The 触发 section says how many Threads it holds, the number the chart shows, so the two can be checked against each other. The sections are reached from anywhere with ⌘K, which lists each of them.
+
+Below the chart and its section, the system problems — a setup that failed, a Source that is down, an Eval that never decided, a message that keeps failing — each with the step that fixes it.
 
 ### Reading individual records
 

@@ -24,7 +24,7 @@ function Slots({ running, max }: { running: number; max: number }) {
  */
 export function SignalRail({ onOpenWaiting, onOpenProblems }: { onOpenWaiting: () => void; onOpenProblems: () => void }) {
   const { t, call, openSession, notify } = usePanel()
-  const { state, overview, overviewError, tasks, tasksError, reload } = usePanelData()
+  const { state, overview, overviewError, tasks, tasksError, reload, reloadOverview } = usePanelData()
   const paused = overview?.paused ?? state?.paused ?? false
   const setup = state?.setup.problem
   const problems = overview?.problems.length ?? 0
@@ -34,7 +34,10 @@ export function SignalRail({ onOpenWaiting, onOpenProblems }: { onOpenWaiting: (
   // The tasks that wait for a person; a task inbox that could not be read shows no number at all.
   const waiting = tasks && !tasksError ? tasks.tasks.filter(task => task.state === 'waiting').length : undefined
   const load = overview?.executor
-  const pause = async () => { await call('POST executor/pause', { body: { paused: !paused } }); await reload() }
+  // The rail reads the overview first, so both the state and the snapshot must be read again: only then does the
+  // switch flip at once, instead of waiting for the next poll to agree with it.
+  const pause = async () => { await call('POST executor/pause', { body: { paused: !paused } })
+    await Promise.all([reload(), reloadOverview()]) }
   const action = paused ? 'resumeProcessing' : 'pauseProcessing'
   return <div className="dt-rail" data-state={reading}>
     <span className={`dt-rail-dot dt-dot-${reading}`} aria-hidden="true" />
@@ -63,6 +66,6 @@ export function SignalRail({ onOpenWaiting, onOpenProblems }: { onOpenWaiting: (
       message={t(paused ? 'resumeProcessingConfirm' : 'pauseProcessingConfirm')} onConfirm={pause} />
     <Button variant="ghost" size="sm" icon={<Icon name="session" size={14} />} aria-label={t('openMaster')}
       title={t('openMaster')} disabled={!state?.masterId}
-      onClick={() => { if (state?.masterId) openSession(state.masterId).catch(failure => notify(errorText(failure))) }} />
+      onClick={() => { if (state?.masterId) openSession(state.masterId).catch(failure => notify(errorText(failure), 'error')) }} />
   </div>
 }

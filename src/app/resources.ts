@@ -208,6 +208,9 @@ const ROUTES: readonly Route[] = [
     const commands = read.host.commands.withSignal(read.signal)
     return sourcePage(read, 'feishu', () => feishuRead(commands, ref, read.resource, read.host.feishuPageSize()))
   }],
+  // A worker may read any Redmine issue or Gerrit change of the instance, not only those of its own ticket — by design.
+  // The corporate scenario has the agent working across repositories: it inspects any issue or change as cross-ticket
+  // context for the work it was authorized for, so these two reads carry no ticket scoping.
   ['redmine/', read => sourcePage(read, 'redmine', () => readRedmine(read.host.commands.withSignal(read.signal), read.resource))],
   ['gerrit/', read => sourcePage(read, 'gerrit', () => readGerrit(read.host.commands.withSignal(read.signal), read.resource))],
   ['trigger/', async read => {

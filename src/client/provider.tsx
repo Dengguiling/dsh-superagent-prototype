@@ -13,7 +13,7 @@ export interface PanelContext {
   back: () => void
   backLabel: string
   openSession: (sessionId: string) => Promise<void>
-  notify: (text: string) => void
+  notify: (text: string, severity?: 'info' | 'error') => void
   restart: () => void
   /** The settings drafts that are unsaved, by their key, so the navigation can say that something is waiting to be saved. */
   drafts: Record<string, boolean>
@@ -71,7 +71,7 @@ export function useAction<A extends unknown[]>(action: (...args: A) => Promise<u
     running.current = true
     setBusy(true)
     try { await action(...args); await reload?.(); return true }
-    catch (failure) { notify(errorText(failure)); return false }
+    catch (failure) { notify(errorText(failure), 'error'); return false }
     finally { running.current = false; setBusy(false) }
   }
   return { run, busy }
@@ -84,12 +84,13 @@ const messages = (t: T): ApiMessages => ({
   // A refusal names a prompt part by its label.
   user: ({ code, values }) => t(`userError.${code}`, values.part ? { ...values, part: valueLabel(t, 'promptPart', values.part) } : values),
 })
-function Toast({ text, onDone, holdMs = 3000 }: { text: string; onDone: () => void; holdMs?: number }) {
+/** The panel's toast: a notice held above the page for a moment; a failing action reads as an alert. */
+function Toast({ text, severity = 'info', onDone, holdMs = 3000 }: { text: string; severity?: 'info' | 'error'; onDone: () => void; holdMs?: number }) {
   const done = useRef(onDone)
   done.current = onDone
   useEffect(() => { const timer = setTimeout(() => done.current(), holdMs + 1000); return () => clearTimeout(timer) }, [holdMs])
-  return createPortal(<div className="dt-toast" role="status" style={{ ['--dt-toast-hold' as string]: `${holdMs}ms` }}>{text}</div>,
-    document.body)
+  return createPortal(<div className="dt-toast" role={severity === 'error' ? 'alert' : 'status'}
+    style={{ ['--dt-toast-hold' as string]: `${holdMs}ms` }}>{text}</div>, document.body)
 }
 const stay = () => {}
 const noSession = async () => {}
@@ -105,8 +106,8 @@ export function PanelProvider({ t, interval = 5000, openSession = noSession, nav
   const copy = useRef(t)
   copy.current = t
   const call = useMemo(() => caller(() => messages(copy.current)), [])
-  const [toast, setToast] = useState<{ text: string; id: number }>()
-  const notify = useCallback((text: string) => setToast({ text, id: Date.now() }), [])
+  const [toast, setToast] = useState<{ text: string; severity: 'info' | 'error'; id: number }>()
+  const notify = useCallback((text: string, severity: 'info' | 'error' = 'info') => setToast({ text, severity, id: Date.now() }), [])
   // The unsaved settings drafts, so the navigation can mark where something waits to be saved.
   const [drafts, setDrafts] = useState<Record<string, boolean>>({})
   const markDraft = useCallback((key: string | undefined, dirty: boolean) => {
@@ -147,6 +148,6 @@ export function PanelProvider({ t, interval = 5000, openSession = noSession, nav
   return <Panel.Provider value={context}><PanelState.Provider value={data}>
     <style>{STYLES}</style>
     {children}
-    {toast && <Toast key={toast.id} text={toast.text} onDone={() => setToast(undefined)} />}
+    {toast && <Toast key={toast.id} text={toast.text} severity={toast.severity} onDone={() => setToast(undefined)} />}
   </PanelState.Provider></Panel.Provider>
 }

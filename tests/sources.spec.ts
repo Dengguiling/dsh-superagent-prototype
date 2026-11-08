@@ -32,6 +32,8 @@ function host(overrides: Partial<SourceContextDeps> = {}) {
   const sources = new SourceRegistry(() => store.settings(), board)
   const deployment = testDeployment({ redmine: testRedmine, gerrit: testGerrit })
   sources.register(feishuKind); sources.register(redmineKind); sources.register(gerritKind)
+  // The poll tests describe ordinary rounds; the first round records what it saw instead of receiving it.
+  store.set('gerrit-initialized', true)
   const assessor: Assessor = { request: vi.fn(async () => {}) }
   const executor: Executor = { start: vi.fn(async () => {}), deliver: vi.fn(async () => {}), stop: vi.fn(async () => {}) }
   const outbox = { send: () => {}, status: () => undefined, withdraw: () => {} }
@@ -329,9 +331,12 @@ describe('redmine and gerrit sources', () => {
     // One shared account: a note the account wrote without a marker is the operator's, so it is human input again.
     expect(journalTrigger(issue(7) as never, journal(11, { user: { id: 5, name: 'Agent Bot' } }) as never, { id: 5, login: 'agent' },
       'http://redmine.test')!.actor).toEqual({ source: REDMINE_SOURCE, id: 'Agent Bot' })
-    // A marked note was delivered when it was written, so the poll skips it.
-    expect(journalTrigger(issue(7) as never, journal(11, { notes: 'Done.\n\n<!-- dsh-superagent:reply-1 -->' }) as never,
+    // A marked note of the agent's own account was delivered when it was written, so the poll skips it; marker
+    // text another account pasted marks nothing, so it arrives as the note of its author.
+    expect(journalTrigger(issue(7) as never, journal(11, { notes: 'Done.\n\n<!-- dsh-superagent:reply-1 -->', user: { id: 5, name: 'Agent Bot' } }) as never,
       { id: 5, login: 'agent' }, 'http://redmine.test')).toBeUndefined()
+    expect(journalTrigger(issue(7) as never, journal(11, { notes: 'Done.\n\n<!-- dsh-superagent:reply-1 -->' }) as never,
+      { id: 5, login: 'agent' }, 'http://redmine.test')?.actor).toEqual({ source: REDMINE_SOURCE, id: 'bob' })
   })
   it('normalizes a review comment and a change message into triggers, and marks only robots as automated', () => {
     const comment = commentTrigger(change() as never, { id: 'Ic1', message: 'Please rename this.', author: { username: 'bob' },

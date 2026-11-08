@@ -93,7 +93,8 @@ function failure(error: unknown): [number, Record<string, unknown>] {
   if (error instanceof RouteError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
-  return [500, { error: error instanceof Error ? error.message : String(error) }]
+  // An unknown failure says nothing about itself: its details go to the log, so the response never leaks internals.
+  return [500, { error: 'The operation failed; the log has the details' }]
 }
 
 function machineView({ stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }: Machine) {
@@ -282,7 +283,12 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
         if (!route) throw new RouteError(404, 'Unknown operation')
         const query = Object.fromEntries(url.searchParams)
         json(res, 200, await route.run({ params: route.params as never, query, body: maxBytes => readBody(req, maxBytes) }))
-      } catch (error) { json(res, ...failure(error)) }
+      } catch (error) {
+        const [status, body] = failure(error)
+        // A failure the routes do not name went to the generic 500: log its full detail, which the response omits.
+        if (status >= 500) ctx.logger.warn('dsh-superagent: %s', String(error))
+        json(res, status, body)
+      }
     } })]
   return () => { for (const dispose of disposers) dispose() }
 }

@@ -1,10 +1,9 @@
 /** The pipeline page: the stages work passes through, each counting the work it holds. */
-import { usePoll, type PmsView } from './api.ts'
-import type { DecisionFilter } from './api.ts'
+import type { DecisionFilter, PmsView } from './api.ts'
 import { InfoTip } from './controls.tsx'
 import { EvalStatus } from './eval.tsx'
 import { ExecutionStatus } from './execution.tsx'
-import { usePanel } from './provider.tsx'
+import { usePanel, usePanelData } from './provider.tsx'
 import { PipelineChart, type PipelineStation, type StationTone } from './pipeline.tsx'
 import { SourceStatus } from './source.tsx'
 import { TriggerStatus } from './trigger.tsx'
@@ -57,8 +56,9 @@ export function stationsOf(t: T, data: PmsView, navigate: (route: Route, replace
  * navigator — a station opens the section that holds the work it counts, so the names and the places agree.
  */
 export function PipelinePage({ view }: { view: FlowView }) {
-  const { t, navigate, call } = usePanel()
-  const { data, error } = usePoll(() => call('GET pms'), [])
+  const { t, navigate } = usePanel()
+  // The panel reads the task inbox once for every page (see the provider), so the chart and the rail never disagree.
+  const { tasks: data, tasksError: error } = usePanelData()
   if (!data) return <LoadState error={error} loading />
   return <>
     <div className="dt-pipe-card">

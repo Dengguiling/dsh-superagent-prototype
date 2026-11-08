@@ -141,6 +141,23 @@ describe('Source registry', () => {
     sources.register(probe)
     expect(sources.policyPart('probe')).toBeUndefined()
   })
+  it('says when a stored policy part is invalid instead of silently applying the defaults, and says nothing once it parses', () => {
+    // The stored sender `alice` passes the Policy's own schema but not the Feishu kind's open_id pattern.
+    let stored: Record<string, unknown> = { allowed: [{ id: 'alice' }] }
+    const board = new HealthBoard()
+    const warnings: string[] = []
+    const sources = new SourceRegistry(() => SettingsSchema.parse({ policy: { sources: { feishu: stored } } }), board,
+      () => () => {}, message => warnings.push(message))
+    sources.register(feishuKind)
+    expect(sources.policyPart('feishu')).toEqual({ allowed: [], syncChat: '', admission: {} })
+    expect(board.all['policy:feishu']).toMatchObject({ state: 'error', detail: expect.stringContaining('defaults in effect') })
+    expect(warnings).toEqual([expect.stringContaining('defaults in effect')])
+    // Once the stored part is valid again the problem entry is gone, and reading a valid part reports no warning.
+    stored = { allowed: [{ id: 'ou_alice', name: 'Alice' }] }
+    expect(sources.policyPart('feishu')).toEqual({ allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: '', admission: {} })
+    expect(board.all['policy:feishu']).toBeUndefined()
+    expect(warnings).toHaveLength(1)
+  })
   it('allows a reply only on a Channel whose Source still listens to its chat', () => {
     const settings = SettingsSchema.parse({ sources: { feishu: { enabled: true, config: { chats: [{ chatId: 'oc_team', listen: 'mentions' }], directMessages: false } } } })
     const sources = new SourceRegistry(() => settings)

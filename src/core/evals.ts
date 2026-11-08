@@ -38,9 +38,14 @@ export class Evals extends EnginePart {
     const now = this.now()
     if (policy.paused) evaluation.pausedAt = now
     else if (evaluation.pausedAt) {
-      evaluation.deadline = new Date(Date.parse(evaluation.deadline) + Date.parse(now) - Date.parse(evaluation.pausedAt)).toISOString()
+      // A deadline an older version wrote in another form does not parse; the Eval keeps it as it was, without the shift.
+      const end = Date.parse(evaluation.deadline), began = Date.parse(evaluation.pausedAt)
+      if (Number.isFinite(end) && Number.isFinite(began)) evaluation.deadline = new Date(end + Date.parse(now) - began).toISOString()
       delete evaluation.pausedAt
-    } else if (evaluation.delivered && evaluation.deadline <= now) { this.expire(thread); return }
+    } else if (evaluation.delivered && (!Number.isFinite(Date.parse(evaluation.deadline)) || evaluation.deadline <= now)) {
+      // An unreadable deadline counts as past due, so it expires through the ordinary path instead of lingering.
+      this.expire(thread); return
+    }
     else return
     this.repo.threads.save(thread)
   }
@@ -175,7 +180,7 @@ export class Evals extends EnginePart {
   }
   /**
    * Record that a ticket's Executor hands back a Trigger that reached it as beyond the ticket, and queue it for a fresh Eval
-   * when the ticket decided it and no other ticket still does (see `handBack`): the gate judges it as any message on its
+   * when the ticket decided it and no other ticket still does (see `handback`): the gate judges it as any message on its
    * Thread, and its candidate carries the reasons, so no requeue notice comes before it. The ticket keeps its Subscription,
    * and hands a Trigger back once.
    * @returns whether it was queued: false while another ticket decides it, and for one the ticket did not decide.
@@ -184,7 +189,7 @@ export class Evals extends EnginePart {
     const ticket = this.require(ticketId)
     if (!ticket.inputs.some(input => input.kind === 'trigger' && input.triggerId === triggerId)) throw new UserError('notReached')
     if (this.repo.triggers.disposition(triggerId)?.handbacks?.some(item => item.ticketId === ticketId)) throw new UserError('handedBack')
-    return this.handBack(ticketId, this.repo.triggers.get(triggerId)!, reason)
+    return this.recordHandback(ticketId, this.repo.triggers.get(triggerId)!, reason)
   }
   /**
    * Marks an `unavailable` Decision dismissed so the overview lists it no more.

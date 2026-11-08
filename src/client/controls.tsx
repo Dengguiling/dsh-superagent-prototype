@@ -69,7 +69,12 @@ export function Pill({ active, onClick, children }: { active: boolean; onClick: 
     onClick={onClick}>{children}</button>
 }
 
-function walk<V extends string>(event: KeyboardEvent, values: readonly V[], value: V, onChange: (next: V) => void) {
+/**
+ * Arrow-key movement over a row of choices (roving tabindex): the selection follows the arrows and the chosen control
+ * takes the focus. `selector` names the control that holds the selection, which differs per role.
+ */
+function walk<V extends string>(event: KeyboardEvent, values: readonly V[], value: V, onChange: (next: V) => void,
+  selector = '[role="tab"][aria-selected="true"]') {
   const index = values.indexOf(value)
   const steps: Record<string, number> = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: values.length - 1 }
   const next = steps[event.key]
@@ -78,7 +83,7 @@ function walk<V extends string>(event: KeyboardEvent, values: readonly V[], valu
   const target = values[(next + values.length) % values.length]!
   if (target !== value) onChange(target)
   const list = event.currentTarget as HTMLElement
-  requestAnimationFrame(() => list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus())
+  requestAnimationFrame(() => list.querySelector<HTMLElement>(selector)?.focus())
 }
 interface TabItem<V extends string> { value: V; label: string; id: string; panelId: string }
 /** Page-level tab bar that re-emits `onChange` when clicking the active tab so callers can reset to the tab root. */
@@ -110,14 +115,33 @@ export function SegmentedTabs<V extends string>({ items, value, onChange, label,
       tabIndex={item.value === value ? 0 : -1} className="dt-tab" onClick={() => onChange(item.value)}>{item.label}</button>)}
   </div>
 }
+/**
+ * A row of in-page tabs (`dt-subtabs`), with the roving tabindex and arrow-key movement of SegmentedTabs: the pages that
+ * hand-write these spans had no keyboard support, and there is one style for them all.
+ */
+export function SubTabs<V extends string>({ label, items, value, onChange }: {
+  label: string; items: readonly { value: V; label: string }[]; value: V; onChange: (next: V) => void
+}) {
+  return <div className="dt-subtabs" role="tablist" aria-label={label} onKeyDown={event => walk(event,
+    items.map(item => item.value), value, onChange)}>
+    {items.map(item => <button key={item.value} type="button" role="tab" className="dt-subtab"
+      tabIndex={item.value === value ? 0 : -1} aria-selected={item.value === value}
+      onClick={() => onChange(item.value)}>{item.label}</button>)}
+  </div>
+}
+/**
+ * One choice out of several, read as a radio group: a segmented control selects one value, unlike tabs it owns no
+ * panels, so `radiogroup`/`radio` with `aria-checked` says what it is without `aria-controls` to point at.
+ */
 export function SegmentedControl<V extends string>({ options, value, onChange, label, disabled, className }: {
   options: readonly { value: V; label: string; title?: string }[]; value: V; onChange: (next: V) => void; label: string; disabled?: boolean
   className?: string
 }) {
-  return <div role="tablist" aria-label={label} className={cx('dt-segmented', className)}
+  return <div role="radiogroup" aria-label={label} className={cx('dt-segmented', className)}
     style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
-    onKeyDown={event => { if (!disabled) walk(event, options.map(option => option.value), value, onChange) }}>
-    {options.map(option => <button key={option.value} type="button" role="tab" aria-selected={option.value === value}
+    onKeyDown={event => { if (!disabled) walk(event, options.map(option => option.value), value, onChange,
+      '[role="radio"][aria-checked="true"]') }}>
+    {options.map(option => <button key={option.value} type="button" role="radio" aria-checked={option.value === value}
       tabIndex={option.value === value ? 0 : -1}
       title={option.title} disabled={disabled} className="dt-segment"
         onClick={() => { if (option.value !== value) onChange(option.value) }}>{option.label}</button>)}

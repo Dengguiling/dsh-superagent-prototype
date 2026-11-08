@@ -9,8 +9,8 @@ import { cursorAt, pause } from './poll.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
 import { retired, type Localized, type SourceKind } from './kind.ts'
 import { redmineLink, sendRedmine } from './redmine-channel.ts'
-import { journalsOf, listIssues, projectOf, readIssue, redmineThreadContext } from './redmine-read.ts'
-import { issueTrigger, journalTrigger, panelToken, SOURCE, type RedmineIssue } from './redmine-trigger.ts'
+import { journalsOf, listIssues, projectOf, readIssue, redmineThreadContext, type IssueQuery } from './redmine-read.ts'
+import { agentNote, issueTrigger, journalTrigger, panelNote, panelToken, SOURCE, type RedmineIssue } from './redmine-trigger.ts'
 
 const RedmineConfigSchema = retired(RedmineAccountsSchema.extend({
   pollSeconds: z.number().int().min(10).max(3600).default(30),
@@ -20,6 +20,8 @@ const RedmineConfigSchema = retired(RedmineAccountsSchema.extend({
   observeJournals: z.boolean().default(false),
 }).strict(), ['login', 'project'])
 export type RedmineConfig = z.infer<typeof RedmineConfigSchema>
+/** How many pages one list may run to, so a pathological server cannot keep a poll round busy for good. */
+const MAX_PAGES = 100
 const OBSERVED = { issue: 'observeIssues', journal: 'observeJournals' } as const
 type Scope = keyof typeof OBSERVED
 /** The receiving scope of a Redmine Trigger: the issue itself, or one of its journals. */
@@ -136,7 +138,7 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
       const failed = pollFailure(failures, config?.failuresBeforeError ?? 1, error)
       if (!signal.aborted && failed) ctx.report('redmine', failed)
     }
-    await pause(Math.max(config?.pollSeconds ?? 30) * 1000, signal)
+    await pause((config?.pollSeconds ?? 30) * 1000, signal)
   }
 }
 export interface Round { read: number; triggers: number; unreadable: number; issues: number }
@@ -152,10 +154,19 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   const since = ctx.state.get(KV.redmine.since) ?? new Date().toISOString()
   if (ctx.state.get(KV.redmine.since) === undefined) ctx.state.set(KV.redmine.since, since)
   const tally: Tally = { skipped: 0 }
-  const changed = await listIssues(commands, { since, limit: config.pageSize }, tally)
+  /** Lists every issue matching `query`, one page at a time, so a burst larger than one page is not dropped. */
+  const listAll = async (query: Omit<IssueQuery, 'offset'>): Promise<RedmineIssue[]> => {
+    const issues: RedmineIssue[] = []
+    for (let offset = 0; offset < MAX_PAGES * config.pageSize; offset += config.pageSize) {
+      const page = await listIssues(commands, { ...query, limit: config.pageSize, offset }, tally)
+      issues.push(...page)
+      if (page.length < config.pageSize) return issues
+    }
+    return issues
+  }
   // The work of the operator is the issues assigned to the bound account: they are read as well, so a task that was
   // assigned before the Source started is not left behind. An issue read already is skipped below.
-  const assigned = await listIssues(commands, { assignedTo: 'me', status: 'open', limit: config.pageSize }, tally)
+  const [changed, assigned] = await Promise.all([listAll({ since }), listAll({ assignedTo: 'me', status: 'open' })])
   const issues = new Map<number, RedmineIssue>()
   for (const issue of [...assigned, ...changed]) issues.set(issue.id, issue)
   const account = ctx.deployment.redmine
@@ -195,13 +206,21 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
     let newest = seen
     for (const journal of journalsOf(issue)) {
       if (journal.id <= seen) continue
-      const token = panelToken(journal.notes ?? '')
+      const notes = journal.notes ?? ''
+      // Only a note the agent account itself wrote can carry its markers; marker text another account pastes is an
+      // ordinary comment. A panel note goes out under the agent's account, which the shared-account setup makes the
+      // operator's own.
+      const own = !!agent.id && journal.user?.id === agent.id
+      const token = own ? panelToken(notes) : undefined
+      // The agent's own reply was delivered when it was written; a panel note the panel handed over was too.
+      if (own && (agentNote(notes) || (panelNote(notes) && token === undefined))) { newest = journal.id; continue }
       // A panel reply the panel did not hand over to the agent itself is delivered here. The cursor stays before it
       // until it is delivered, so a note of the operator is never skipped for good.
       if (token !== undefined && !ctx.state.get(KV.pms.delivered(token))) {
         const trigger = journalTrigger(issue, journal, agent, base, project, { panel: true })
         if (!trigger) { newest = journal.id; continue }
-        await ctx.receive(trigger)
+        // The panel's own delivery path uses this ID, so a crash between the two lets Intake answer `duplicate`.
+        await ctx.receive({ ...trigger, id: key('redmine-panel', token) })
         ctx.state.set(KV.pms.delivered(token), true)
         newest = journal.id
         triggers += 1
@@ -218,6 +237,13 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
     ctx.threads.describe(`${SOURCE}:${item.id}`, { label: `#${issue.id} ${issue.subject}`,
       url: `${base.replace(/\/+$/, '')}/issues/${issue.id}`,
       facts: { number: { value: `#${issue.id}` }, ...issue.status?.name ? { status: { value: issue.status.name } } : {} } })
+  }
+  // A round that left issues unread keeps the window, so their updates are read again next round; the issues read
+  // already produce no second Trigger, because their IDs are stable.
+  if (unreadable > 0) {
+    ctx.report('redmine', { state: 'error', detail: `${read} issues, ${triggers} triggers, ${unreadable} unread: the poll window stays`,
+      at: new Date().toISOString() })
+    return { read, triggers, unreadable, issues: issues.size }
   }
   // The cursor steps back five seconds so an issue written during the round is read again; stable ids make that harmless.
   ctx.state.set(KV.redmine.since, cursorAt(new Date().toISOString()))

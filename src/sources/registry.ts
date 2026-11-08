@@ -13,8 +13,11 @@ import type { ChannelLink, ChannelLinks, SourceInstance, SourceKind, TriggerCont
 export class SourceRegistry implements SourceScope {
   private readonly kinds = new Map<string, SourceKind>()
   private readonly health = new Map<string, HealthEntry>()
+  /** The `policy:<id>` entries this registry holds while a stored policy part fails its kind's schema, released once it parses. */
+  private readonly policyProblems = new Map<string, HealthEntry>()
   constructor(private readonly settings: () => Settings, private readonly board: Pick<HealthBoard, 'claim'> = new HealthBoard(),
-    private readonly registered: (kind: SourceKind) => () => void = () => () => {}) {}
+    private readonly registered: (kind: SourceKind) => () => void = () => () => {},
+    private readonly warn: (message: string) => void = () => {}) {}
 
   /** Registers a SourceKind, claims its health entries on HealthBoard (rejecting `sync:` prefixes owned by Settings), and returns an unregister disposer. */
   register<C extends Record<string, unknown>>(kind: SourceKind<C>): () => void {
@@ -23,7 +26,12 @@ export class SourceRegistry implements SourceScope {
     const synced = kind.health.find(name => name.startsWith('sync:'))
     if (synced) throw refused(synced)
     const entries = new Map<string, HealthEntry>()
-    const release = () => { for (const [name, entry] of entries) { entry.release(); this.health.delete(name) } }
+    const release = () => {
+      for (const [name, entry] of entries) { entry.release(); this.health.delete(name) }
+      // A stored policy part that failed while the kind was registered holds its problem entry; registration is over.
+      this.policyProblems.get(`policy:${kind.kind}`)?.release()
+      this.policyProblems.delete(`policy:${kind.kind}`)
+    }
     for (const name of kind.health) {
       try { entries.set(name, this.board.claim(name, { state: 'starting', detail: '' })) }
       catch { release(); throw refused(name) }
@@ -67,11 +75,30 @@ export class SourceRegistry implements SourceScope {
       return [id, policy ? { ...policy.schema.parse(rest), admission: AdmissionTableSchema.parse(admission ?? {}) } : part]
     }))
   }
+  /**
+   * A stored part the kind's schema refuses keeps the Policy's admission behavior (defaults in effect) but must not fail
+   * quietly: the problem is logged and held on the `policy:<id>` health entry, which the overview lists among the system
+   * problems, until the stored part parses again. It does not change what the Policy accepts.
+   */
+  private invalidPolicy(id: string, problem: string | undefined): void {
+    const name = `policy:${id}`
+    const held = this.policyProblems.get(name)
+    if (!problem) { held?.release(); this.policyProblems.delete(name); return }
+    if (held) {
+      if (held.get()?.detail !== problem) { held.set({ state: 'error', detail: problem }); this.warn(problem) }
+      return
+    }
+    this.warn(problem)
+    try { this.policyProblems.set(name, this.board.claim(name, { state: 'error', detail: problem })) }
+    catch { /* Another part reports this entry; the problem stays in the log. */ }
+  }
   policyPart(id: string, settings = this.settings()) {
     const policy = this.kinds.get(id)?.policy
     if (!policy) return undefined
     const { admission, ...rest } = settings.policy.sources[id] ?? {}
     const parsed = policy.schema.safeParse(rest)
+    this.invalidPolicy(id, parsed.success ? undefined
+      : `The ${id} Source's stored policy part was invalid, defaults in effect: ${parsed.error.issues[0]?.message ?? String(parsed.error)}`)
     return { ...parsed.success ? parsed.data : policy.schema.parse({}), admission: AdmissionTableSchema.safeParse(admission ?? {}).data ?? {} }
   }
   channelAllowed(channel: { source: string; address: Record<string, string> }, settings = this.settings()): boolean {

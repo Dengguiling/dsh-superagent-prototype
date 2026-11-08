@@ -28,8 +28,8 @@ export const KV = {
   prompts: { revision: record<number>('prompt-revision'), version: family<PromptVersion, [revision: number]>('prompt-version:'),
     /** The built-in text of a prompt part an override was edited from, by its `base`, which shows what an upgrade changed. */
     builtIn: family<string, [base: string]>('prompt-built-in:') },
-  /** Runtime: the main Session's ID. */
-  runtime: { masterId: record<string>('master-id') },
+  /** Runtime: the main Session's ID, and the last time the Outbox's settled receipts were pruned. */
+  runtime: { masterId: record<string>('master-id'), receiptPrunedAt: record<string>('receipt-pruned-at') },
   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
   sessions: { prompts: family<number[], [session: string]>('session-prompts:') },
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */
@@ -57,10 +57,10 @@ export const KV = {
   pms: { task: family<{ archivedAt?: string; deletedAt?: string }, [issue: number]>('pms-task:'),
     delivered: family<boolean, [token: string]>('pms-delivered:') },
   /**
-   * Gerrit Source: the time of the last poll, the comment and message identifiers already read on each change, and the
-   * change each ticket follows.
+   * Gerrit Source: whether the first poll round ran (it records what it saw instead of receiving it), the comment and
+   * message identifiers already read on each change, and the change each ticket follows.
    */
-  gerrit: { since: record<string>('gerrit-since'), comment: family<string[], [change: string]>('gerrit-comment:'),
-    message: family<string[], [change: string]>('gerrit-message:'),
-    change: family<{ number: number; id: string; project: string; branch: string; url: string }, [change: string]>('gerrit-change:') },
+  gerrit: { initialized: record<boolean>('gerrit-initialized'),
+    comment: family<string[], [change: string]>('gerrit-comment:'),
+    message: family<string[], [change: string]>('gerrit-message:') },
 }

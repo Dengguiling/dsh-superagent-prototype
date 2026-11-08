@@ -11,6 +11,17 @@ const entries = ['README.md', 'SETUP.md']
 const design = readdirSync(join(ROOT, 'design')).filter(name => name.endsWith('.md')).map(name => `design/${name}`)
 const documents = [...entries, ...readdirSync(join(ROOT, 'docs')).filter(name => name.endsWith('.md')).map(name => `docs/${name}`), ...design]
 const read = (path: string): string => readFileSync(join(ROOT, path), 'utf8')
+/**
+ * Instruction phrases that the relation model and the derived Gerrit address retired: Redmine and Gerrit keep no sender
+ * list, the review server's SSH address and branch follow from its HTTP address, and the merge waits for the leader's
+ * Code-Review +2 vote. Each phrase must stay gone from every document.
+ */
+const retired = [
+  'the allowed lists', 'until a list has someone', 'may ask the agent for work',
+  'SSH address, account', '| SSH address |', '| Target branch |',
+  'on the target branch', 'commit email and target branch', 'Its web URL and its SSH URL',
+  'the configured branch', 'asks for a review by somebody else', '发送者不在这个来源的名单里',
+]
 function links(file: string): string[] {
   return [...readFileSync(file, 'utf8').matchAll(/\]\(([^)\s]+)\)/g)].map(match => match[1]!.split('#')[0]!).filter(target => target && !/^[a-z]+:/.test(target))
 }
@@ -57,6 +68,10 @@ describe('documentation', () => {
   })
   it('leaves no merge conflict markers in any document', () => {
     expect(documents.filter(path => /^(<{7}|>{7}) /m.test(read(path)))).toEqual([])
+  })
+  it('keeps the retired sender-list and Gerrit-settings instructions out of every document', () => {
+    const stale = documents.flatMap(path => retired.filter(phrase => read(path).includes(phrase)).map(phrase => `${path}: ${phrase}`))
+    expect(stale).toEqual([])
   })
   it('lists every module of src in the module table of 007 Architecture, and only files that exist', () => {
     const modules = listed('Modules')

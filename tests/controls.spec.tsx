@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { act, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it } from 'vitest'
-import { Modal, SegmentedTabs } from '../src/client/controls.tsx'
+import { Modal, SegmentedControl, SegmentedTabs, SubTabs } from '../src/client/controls.tsx'
 
 declare global { var IS_REACT_ACT_ENVIRONMENT: boolean }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -94,5 +94,49 @@ it('moves the tab selection with arrow keys and wraps at the ends', async () => 
   await act(async () => { list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })) })
   expect(seen).toEqual(['c', 'a'])
   expect(container.querySelector('[aria-selected="true"]')?.textContent).toBe('a')
+  act(() => { root.unmount() })
+})
+
+it('reads a segmented control as a radio group and moves its choice with arrow keys', async () => {
+  const seen: string[] = []
+  function Harness() {
+    const [value, setValue] = useState<'a' | 'b' | 'c'>('b')
+    return <SegmentedControl label="mode" value={value} onChange={next => { seen.push(next); setValue(next) }}
+      options={(['a', 'b', 'c'] as const).map(item => ({ value: item, label: item }))} />
+  }
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  await act(async () => { root.render(<Harness />) })
+  // A segmented control owns no panels, so it is a radio group, not a tablist: one choice, marked aria-checked.
+  const group = container.querySelector('[role="radiogroup"]')!
+  expect(container.querySelectorAll('[role="radio"]')).toHaveLength(3)
+  expect(container.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('b')
+  expect(container.querySelector('[role="radio"][aria-checked="true"]')?.getAttribute('tabindex')).toBe('0')
+  expect(container.querySelector('[role="radio"][aria-checked="false"]')?.getAttribute('tabindex')).toBe('-1')
+  await act(async () => { group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+  await act(async () => { group.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })) })
+  expect(seen).toEqual(['c'])
+  expect(container.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('c')
+  act(() => { root.unmount() })
+})
+
+it('moves between the hand-written subtabs with arrow keys through the shared helper', async () => {
+  const seen: string[] = []
+  function Harness() {
+    const [value, setValue] = useState<'one' | 'two' | 'three'>('two')
+    return <SubTabs label="sources" value={value} onChange={next => { seen.push(next); setValue(next) }}
+      items={(['one', 'two', 'three'] as const).map(item => ({ value: item, label: item }))} />
+  }
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  await act(async () => { root.render(<Harness />) })
+  const list = container.querySelector('[role="tablist"]')!
+  expect(container.querySelectorAll('[role="tab"]')).toHaveLength(3)
+  // Roving tabindex: one tab holds the focus stop, and the arrows reach the others.
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('tabindex')).toBe('0')
+  await act(async () => { list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+  await act(async () => { list.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })) })
+  expect(seen).toEqual(['three'])
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('three')
   act(() => { root.unmount() })
 })

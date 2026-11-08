@@ -85,14 +85,17 @@ export class Commands {
   }
   /**
    * Runs the Feishu bot's `lark-cli` and returns the JSON `data` payload.
-   * @throws CliError with Feishu's error code on failure (rewriting 232011 when the bot is not in the chat).
+   * @throws CliError with Feishu's error code on failure (rewriting 232011 when the bot is not in the chat), and one
+   *   without any detail when the CLI answered something that is not JSON, so its output never reaches a message.
    */
   async lark<T>(args: string[], cwd?: string): Promise<T> {
     const bot = this.deployment.feishu
     if (!bot) throw new Error('The Feishu Source has no working bot CLI')
     const output = await this.run(bot.cli, [...args, '--as', 'bot', '--format', 'json'], cwd)
       .catch((error: unknown) => { throw membership(error) })
-    const result = JSON.parse(output) as { ok: boolean; data: T; error?: { code?: number; message?: string } }
+    let result: { ok: boolean; data: T; error?: { code?: number; message?: string } }
+    try { result = JSON.parse(output) as typeof result }
+    catch { throw new CliError('The Feishu CLI did not answer JSON') }
     const code = result.error?.code
     if (!result.ok) throw membership(new CliError(`${result.error?.message ?? 'Feishu command failed'}${code ? ` (${code})` : ''}`, code))
     return result.data

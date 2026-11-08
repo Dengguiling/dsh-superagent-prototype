@@ -2,12 +2,20 @@
 // The Prompts settings.
 import { act } from 'react'
 import { builtInBase, builtInParts, defaultPrompts } from '../src/app/prompts.ts'
-import { expect, it } from 'vitest'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
 import { usePanel, mount, settle, all, tab, click, type, text, field, at } from './fixtures/panel.tsx'
 import { server, promptVersion } from './fixtures/panel-server.ts'
 
 usePanel()
+/** The full prompt's preview is sent half a second after the draft settles (see FullPrompt); give it that quiet window. */
+async function previewShown() {
+  for (let waited = 0; waited < 4000 && !all('.dt-preview-part').length; waited += 100) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)) })
+    await settle()
+  }
+  expect(all('.dt-preview-part').length).toBeGreaterThan(0)
+}
 it('lists the team sections, then the built-in parts, edits and saves them separately from settings, and resets one section', async () => {
   at({ page: 'settings', query: { group: 'prompts' } })
   await mount()
@@ -17,6 +25,7 @@ it('lists the team sections, then the built-in parts, edits and saves them separ
   await type(field<HTMLTextAreaElement>(zh.promptBody), 'Custom communication rule')
   expect(text()).toContain('1 处修改')
   await click(tab(zh.promptViewFull))
+  await previewShown()
   // The full prompt shows every part, team or built in, as editable, in the order the Session reads them.
   const parts = all('.dt-preview-part').map(part => [part.querySelector('b')?.textContent, part.hasAttribute('data-editable')])
   expect(parts.slice(0, 5)).toEqual([['共享约定', true], ['主 Session 角色', true], ['沟通方式', true], ['工单范围', true], ['交付要求', true]])
@@ -46,6 +55,7 @@ it('shows a built-in skill with the CLI notes in the full prompt, editable as a 
   at({ page: 'settings', query: { group: 'prompts' } })
   await mount()
   await click(tab(zh.promptViewFull))
+  await previewShown()
   await act(async () => { const select = field<HTMLSelectElement>(zh.promptPreviewTarget); select.value = 'skill/gerrit'; select.dispatchEvent(new Event('change', { bubbles: true })) }); await settle()
   expect(text()).toContain('## CLI usage')
   expect(all('.dt-preview-part[data-editable] b').map(name => name.textContent)).toEqual([zh['promptPart.skill/gerrit']])
@@ -79,6 +89,7 @@ it('keeps the Prompts save bar hidden while a preview loads for an unchanged dra
   const watch = new MutationObserver(() => { if (document.querySelector('.dt-savebar')) shown = true })
   watch.observe(document.body, { childList: true, subtree: true })
   await click(tab(zh.promptViewFull))
+  await previewShown()
   await settle()
   watch.disconnect()
   expect(shown).toBe(false)
@@ -92,6 +103,7 @@ it('marks team sections that differ from the defaults, and shows a draft as a di
   expect(all('.dt-prompt-nav .dt-nav-item').filter(item => item.querySelector('.dt-changed-tag')).map(item => item.querySelector('span')!.firstChild?.textContent)).toEqual(['交付要求'])
   await type(field<HTMLTextAreaElement>(zh.promptBody), `${defaultPrompts().communication}\nSign as the agent.`)
   await click(tab(zh.promptViewFull))
+  await previewShown()
   // A draft opens against the saved version: only its change shows, and the parts it leaves as they were fold.
   expect(all('.dt-preview-part ins').map(line => line.textContent)).toEqual(['Sign as the agent.\n'])
   expect(all('.dt-preview-part del')).toHaveLength(0)
@@ -125,6 +137,7 @@ it('edits a built-in part as an override of its built-in text, marks it changed,
   expect(server.prompts.current.config.overrides).toEqual({ 'runtime/shared': { text: 'Shared, the team way.', base: builtInBase(shared.text) } })
   // The full prompt reads the override in place of the built-in text, compared with the defaults.
   await click(tab(zh.promptViewFull))
+  await previewShown()
   expect(all('.dt-preview-part ins').map(line => line.textContent)).toContain('Shared, the team way.\n')
   await click(all('.dt-preview-part[data-editable] button')[0]!)
   await click(zh.promptResetSection)
@@ -207,6 +220,7 @@ it('shows a draft\'s template of a generated part filled, and names a part by it
   await click(builtInItem(zh['promptPart.runtime/environment']))
   await type(field<HTMLTextAreaElement>(zh.promptBody), 'Where you work:\n{variables}')
   await click(tab(zh.promptViewFull))
+  await previewShown()
   const environment = all('.dt-preview-part').find(part => part.querySelector('b')?.textContent === zh['promptPart.runtime/environment'])!
   expect(environment.querySelector('pre')?.textContent).toBe('Where you work:\n')
   await click(tab(zh.promptViewEdit))
@@ -235,4 +249,38 @@ it('loads a version from the history without its overrides of parts this version
   server.prompts.current = saved
   await click(zh.save)
   expect(server.prompts.current.config.overrides).toEqual({ 'runtime/dispatch': dispatch })
+})
+
+it('sends one preview per pause in editing, and keeps the last preview when a refresh fails', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  onTestFinished(() => { vi.useRealTimers() })
+  at({ page: 'settings', query: { group: 'prompts' } })
+  await mount()
+  const previews = () => server.requests.filter(request => request.path === 'prompts/preview').length
+  const openFull = async () => { await act(async () => { tab(zh.promptViewFull).click() }) }
+  // Several characters in one burst: nothing is sent yet, and the full view asks once, after the quiet window.
+  await type(field<HTMLTextAreaElement>(zh.promptBody), 'a')
+  await type(field<HTMLTextAreaElement>(zh.promptBody), 'ab')
+  await type(field<HTMLTextAreaElement>(zh.promptBody), 'abc')
+  expect(previews()).toBe(0)
+  await openFull()
+  expect(previews()).toBe(0)
+  await act(async () => { await vi.advanceTimersByTimeAsync(600) }); await settle()
+  expect(previews()).toBe(1)
+  // Another burst of edits, then back to the full view: one preview again, sent only after the quiet window.
+  await click(tab(zh.promptViewEdit))
+  await type(field<HTMLTextAreaElement>(zh.promptBody), 'abcd')
+  await openFull()
+  expect(previews()).toBe(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(600) }); await settle()
+  expect(previews()).toBe(2)
+  expect(text()).toContain('abcd')
+  // A failing refresh keeps the preview it had and says so in a line, instead of wiping the view. With the draft
+  // discarded, every failed poll recomposes the config and asks for a fresh preview, in vain.
+  server.down = true
+  await click(zh.discard)
+  await act(async () => { await vi.advanceTimersByTimeAsync(7000) }); await settle()
+  expect(all('.dt-preview-part').length).toBeGreaterThan(0)
+  expect(text()).toContain('abcd')
+  expect(text()).toContain(zh.previewFailed.replace('{error}', zh.hostNotRunning))
 })

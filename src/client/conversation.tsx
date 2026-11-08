@@ -1,7 +1,7 @@
 /** The task opened in the Workbench: its Redmine conversation, the ticket that works it, and the reply box that continues it. */
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button, Icon } from './controls.tsx'
-import { usePoll, type TaskDetailView, type TaskMessage } from './api.ts'
+import { ApiError, usePoll, type TaskDetailView, type TaskMessage } from './api.ts'
 import { ticketMark } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
 import { errorText, reasonLabel, type T } from './text.ts'
@@ -43,6 +43,17 @@ export function Conversation({ id, onBack, onChanged }: { id: string; onBack: ()
   const { t, call, notify, openSession } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET pms/:id', { id }), [id], 4000)
   const [text, setText] = useState('')
+  // A task deleted elsewhere (or from another view) ends the conversation: the poll confirms the record is gone, so
+  // return to the list once instead of showing an error for it forever.
+  const gone = useRef(false)
+  const missing = error instanceof ApiError && error.missing
+  const leave = useRef(onBack)
+  leave.current = onBack
+  useEffect(() => {
+    if (!missing || gone.current) return
+    gone.current = true
+    leave.current()
+  }, [missing])
   const archived = !!data?.task.archivedAt
   const archive = useAction(async () => { await call('POST pms/:id/archive', { id, body: { archived: !archived } }); await onChanged() }, { reload })
   const remove = useAction(async () => { await call('POST pms/:id/delete', { id }); await onChanged() })
@@ -58,7 +69,7 @@ export function Conversation({ id, onBack, onChanged }: { id: string; onBack: ()
   }
   const ticket = data?.task.ticket
   return <div className="dt-taskview">
-    {error && !data && <LoadState error={error} loading={false} />}
+    {error && !data && !missing && <LoadState error={error} loading={false} />}
     {!data && !error && <Hint>{t('loading')}</Hint>}
     {error && data && <p className="dt-hint dt-error">{errorText(error)}</p>}
     {data && <>

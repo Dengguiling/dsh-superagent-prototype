@@ -262,3 +262,29 @@ it('reads `%` and `_` in a key prefix and a search query as written, not as patt
   expect([store.read.search('50%').map(item => item.id), store.read.search('a_b').map(item => item.id)]).toEqual([['p'], ['r']])
   store.close()
 })
+
+it('prunes settled receipts older than the cutoff, keeping pending ones and fresh settles', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  const message = (id: string) => ({ id, channel: { source: 'feishu', thread: 'feishu:oc_1:om_1', address: {} }, text: id, kind: 'reply' as const })
+  for (const id of ['old', 'fresh', 'waiting', 'legacy']) store.receipts.add(message(id))
+  store.receipts.settle(message('old'), 'sent')
+  store.receipts.settle(message('fresh'), 'sent')
+  store.receipts.settle(message('legacy'), 'channelGone')
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
+  // A receipt settled before the build wrote `settledAt` carries only its drop time, which the prune also reads.
+  store.db.prepare("UPDATE outbox SET value = json_set(value, '$.settledAt', ?) WHERE id = 'old'").run(daysAgo(40))
+  store.db.prepare("UPDATE outbox SET value = json_set(json_set(value, '$.settledAt', NULL), '$.dropped.at', ?) WHERE id = 'legacy'").run(daysAgo(40))
+  expect(store.receipts.prune(daysAgo(30))).toBe(2)
+  expect(['old', 'fresh', 'waiting', 'legacy'].map(id => store.receipts.get(id)?.status)).toEqual([undefined, 'sent', 'pending', undefined])
+  store.close()
+})
+
+it('lists the settings versions newest first from the newest keys, so a limit parses only what it returns', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  for (let index = 1; index <= 5; index++) {
+    store.saveSettings({ ...store.settings(), paused: index % 2 === 1 }, { source: 'panel', block: 'pause', policyVersion: 'v', policyChanged: false, notified: [] })
+  }
+  expect(store.settingsHistory(2).map(version => version.revision)).toEqual([5, 4])
+  expect(store.settingsHistory().map(version => version.revision)).toEqual([5, 4, 3, 2, 1])
+  store.close()
+})

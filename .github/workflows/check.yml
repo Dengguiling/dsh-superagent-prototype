@@ -1,0 +1,11 @@
+# Typecheck, test and build the plugin on every push and pull request, exactly as `pnpm check` runs locally.
+name: check
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check

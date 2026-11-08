@@ -7,6 +7,14 @@ import { usePanel, mount, remount, settle, all, find, tab, click, type, text, fi
 import { server, problemOf, droppedReply } from './fixtures/panel-server.ts'
 
 usePanel()
+/** The full prompt's preview is sent half a second after the draft settles (see FullPrompt); give it that quiet window. */
+const previewShown = async () => {
+  for (let waited = 0; waited < 4000 && !all('.dt-preview-part').length; waited += 100) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)) })
+    await settle()
+  }
+  expect(all('.dt-preview-part').length).toBeGreaterThan(0)
+}
 it('shows each Source\'s state on the Source status and opens its settings from a setup problem', async () => {
   await mount()
   await openPage(zh, 'source')
@@ -192,6 +200,7 @@ it('leaves Feishu out of a Redmine-and-Gerrit deployment', async () => {
   at({ page: 'settings', query: { group: 'prompts' } })
   await mount()
   await click(tab(zh.promptViewFull))
+  await previewShown()
   expect([...field<HTMLSelectElement>(zh.promptPreviewTarget).options].map(option => option.textContent)).toEqual(['主 Session',
     '执行器 Session', 'dsh-superagent-redmine', 'dsh-superagent-gerrit'])
 })

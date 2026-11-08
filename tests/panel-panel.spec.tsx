@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Panel search, glossary, route persistence, and host-down fallback.
+// Panel search, glossary, route persistence, host-down fallback, and the signal rail above every page.
 import { act } from 'react'
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
@@ -7,6 +7,19 @@ import { usePanel, mount, remount, settle, all, click, type, text, field, openPa
 import { server, found } from './fixtures/panel-server.ts'
 
 usePanel()
+it('flips the rail to paused as soon as its switch confirms, without waiting for the next poll', async () => {
+  await mount()
+  // The rail reads the overview first (see SignalRail), so pausing must read both the state and the snapshot again.
+  expect(document.querySelector('.dt-rail')?.getAttribute('data-state')).toBe('attention')
+  expect(document.querySelector('.dt-rail-state')?.textContent).toBe(zh.pmsAttention)
+  await click(zh.pauseProcessing)
+  await click(zh.confirm)
+  expect(document.querySelector('.dt-rail')?.getAttribute('data-state')).toBe('paused')
+  expect(document.querySelector('.dt-rail-state')?.textContent).toBe(zh.pmsPaused)
+  await click(zh.resumeProcessing)
+  await click(zh.confirm)
+  expect(document.querySelector('.dt-rail')?.getAttribute('data-state')).toBe('attention')
+})
 it('states why a filtered search result has no Thread instead of opening an empty one', async () => {
   server.search = { items: [found('e9', '2026-09-20T00:00:00Z', { source: 'redmine', actor: { source: 'redmine', id: 'someone' },
     preview: 'issue text', threads: ['redmine:7'],

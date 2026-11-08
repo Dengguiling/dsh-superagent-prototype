@@ -176,10 +176,17 @@ export class Sessions {
     await this.host.effects.idle('notice')
     return this.host.effects.pending('notice', name) ? 'pending' : 'injected'
   }
-  /** Injects a notice into the main Session without waking it; no-op if the main Session does not exist yet. */
+  /**
+   * Injects a notice into the main Session without waking it. A main Session that does not exist yet is the documented
+   * silent no-op; any other resolve failure throws, so the notice effect stays pending and retries instead of the
+   * transient error silently dropping the notice.
+   */
   private async inject(name: string, value: Record<string, unknown>, summary: string): Promise<void> {
     const resolved = await this.ctx.sessionController.resolveAgent(this.host.masterId as SessionId)
-    if ('error' in resolved) return
+    if ('error' in resolved) {
+      if (resolved.error.code !== 'session/not-found') throw resolved.error
+      return
+    }
     // Deduplicate by notice name and payload hash so retries are idempotent while updated payloads still deliver.
     const text = JSON.stringify(value)
     await this.agentDelivery.send(resolved.agent, `notice:${name}:${key(text)}`, text, { inject: summary }, this.host.lifetime)

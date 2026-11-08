@@ -109,14 +109,18 @@ describe('the Redmine translation', () => {
     expect(trigger?.id).toBe(key('redmine-journal', '11'))
     expect(trigger?.actor).toEqual({ source: SOURCE, id: 'bob' })
     expect(trigger?.url).toBe(`${BASE}/issues/7#change-11`)
-    // Both kinds of notes were delivered when they were written; their hidden markers keep the poll from delivering them again.
+    // Both kinds of markers mark a note; the poll delivers a marked note only when the agent's account wrote it.
     expect([agentNote('<!-- dsh-superagent:reply-1 -->'), agentNote('<!-- dsh-superagent-panel:tok -->'),
       panelNote('<!-- dsh-superagent-panel:tok -->'), panelNote('<!-- dsh-superagent:reply-1 -->')]).toEqual([true, false, true, false])
     expect(panelNoteText('tok')).toBe('<!-- dsh-superagent-panel:tok -->')
+    // A marked note of the agent's account was delivered when it was written, so it produces no Trigger.
+    expect(journalTrigger(item, journal(11, { notes: 'Pushed the patch.\n\n<!-- dsh-superagent:reply-1 -->', user: user(5, AGENT) }) as never,
+      AGENT_ID, BASE)).toBeUndefined()
+    expect(journalTrigger(item, journal(11, { notes: 'Please look.\n\n<!-- dsh-superagent-panel:tok -->', user: user(5, AGENT) }) as never,
+      AGENT_ID, BASE)).toBeUndefined()
+    // The same marker text pasted by another account marks nothing: nobody forges the agent's markers.
     expect(journalTrigger(item, journal(11, { notes: 'Pushed the patch.\n\n<!-- dsh-superagent:reply-1 -->' }) as never,
-      AGENT_ID, BASE)).toBeUndefined()
-    expect(journalTrigger(item, journal(11, { notes: 'Please look.\n\n<!-- dsh-superagent-panel:tok -->' }) as never,
-      AGENT_ID, BASE)).toBeUndefined()
+      AGENT_ID, BASE)?.id).toBe(key('redmine-journal', '11'))
     // One shared account: a note the account wrote without a marker is the operator's, so it is human input.
     expect(journalTrigger(item, journal(11, { user: user(5, AGENT) }) as never, AGENT_ID, BASE)?.actor).toEqual({ source: SOURCE, id: AGENT })
   })
@@ -191,16 +195,72 @@ describe('a Redmine polling round', () => {
     const note = journal(11, { notes: 'Please also cover the last page.\n\n<!-- dsh-superagent-panel:token-1 -->', user: user(5, AGENT) })
     redmine({ '/issues.json': { issues: [issue(7)] }, '/issues/7.json': { issue: issue(7, { journals: [note] }) } })
     await pollRound(h, new AbortController().signal)
-    // The note of the panel reaches the agent through the poll, without the marker in its text.
+    // The note of the panel reaches the agent through the poll, without the marker in its text, under the ID the
+    // panel's own delivery path uses, so a crash between the two paths delivers it once.
     const delivered = h.receive.mock.calls.map(call => call[0])
-    expect(delivered.map(trigger => trigger.id)).toContain(key('redmine-journal', '11'))
-    const reply = delivered.find(trigger => trigger.id === key('redmine-journal', '11'))!
+    expect(delivered.map(trigger => trigger.id)).toContain(key('redmine-panel', 'token-1'))
+    const reply = delivered.find(trigger => trigger.id === key('redmine-panel', 'token-1'))!
     expect(reply.text).toBe('Please also cover the last page.')
     expect(reply.meta).toMatchObject({ issueId: 7, kind: 'journal' })
     expect(h.store.get(KV.pms.delivered('token-1'))).toBe(true)
     // The next round reads it again, but the recorded token says it was delivered.
     await pollRound(h, new AbortController().signal)
-    expect(h.receive.mock.calls.filter(call => call[0].id === key('redmine-journal', '11'))).toHaveLength(1)
+    expect(h.receive.mock.calls.filter(call => call[0].id === key('redmine-panel', 'token-1'))).toHaveLength(1)
+    h.store.close()
+  })
+  it('delivers a forged panel marker as an ordinary note of its author', async () => {
+    const h = host()
+    h.store.set(KV.redmine.since, '2026-08-01T00:00:00Z')
+    // Another account pasted a panel marker: the poll treats the note as the comment it is, in the author's name.
+    const forged = journal(13, { notes: 'Looks done.\n\n<!-- dsh-superagent-panel:token-9 -->' })
+    redmine({ '/issues.json': { issues: [issue(7)] }, '/issues/7.json': { issue: issue(7, { journals: [forged] }) } })
+    await pollRound(h, new AbortController().signal)
+    expect(h.receive.mock.calls.map(call => call[0].id)).toContain(key('redmine-journal', '13'))
+    expect(h.store.get(KV.pms.delivered('token-9'))).toBeUndefined()
+    h.store.close()
+  })
+  it('keeps the poll window when an issue of the round stayed unread, so its updates are not lost', async () => {
+    const h = host()
+    h.store.set(KV.redmine.since, '2026-08-01T00:00:00Z')
+    redmine({ '/issues.json': { issues: [issue(7), issue(9)] } })
+    // Issue 9 exists in the list but cannot be read with its journals this round.
+    vi.spyOn(Commands.prototype, 'http').mockImplementation(async url => {
+      if (url.includes('/issues/9.json')) return { status: 500, body: 'server error' }
+      const path = url.replace(BASE, '').split('?')[0]!
+      return path === '/issues.json' ? { status: 200, body: JSON.stringify({ issues: [issue(7), issue(9)] }) }
+        : { status: 200, body: JSON.stringify({ issue: issue(7) }) }
+    })
+    const round = await pollRound(h, new AbortController().signal)
+    expect(round.unreadable).toBe(1)
+    // The cursor did not move: the window is still the one the round started from.
+    expect(h.store.get(KV.redmine.since)).toBe('2026-08-01T00:00:00Z')
+    // The next round reads both again, and the issue that arrives whole delivers its Trigger.
+    calls.length = 0
+    redmine({ '/issues.json': { issues: [issue(7), issue(9)] }, '/issues/7.json': { issue: issue(7) }, '/issues/9.json': { issue: issue(9) } })
+    const next = await pollRound(h, new AbortController().signal)
+    expect(next.unreadable).toBe(0)
+    expect(h.receive.mock.calls.map(call => call[0].id)).toContain(key('redmine-issue', '9'))
+    expect(h.store.get(KV.redmine.since)).not.toBe('2026-08-01T00:00:00Z')
+    h.store.close()
+  })
+  it('lists past one page when more issues changed than a page holds', async () => {
+    const h = host()
+    h.store.set(KV.redmine.since, '2026-08-01T00:00:00Z')
+    const page = (from: number, to: number) => ({ issues: Array.from({ length: to - from }, (_, i) => issue(from + i)) })
+    vi.spyOn(Commands.prototype, 'http').mockImplementation(async url => {
+      const query = new URL(url.replace(BASE, ''), BASE).searchParams
+      const offset = Number(query.get('offset') ?? 0), limit = Number(query.get('limit') ?? 100)
+      if (query.get('updated_on')) {
+        const issues = offset < 250 ? page(offset, Math.min(offset + limit, 250)) : { issues: [] }
+        return { status: 200, body: JSON.stringify(issues) }
+      }
+      const detail = /^\/issues\/(\d+)\.json$/.exec(new URL(url.replace(BASE, ''), BASE).pathname)
+      if (detail) return { status: 200, body: JSON.stringify({ issue: issue(Number(detail[1])) }) }
+      return { status: 200, body: JSON.stringify({ issues: [] }) }
+    })
+    const round = await pollRound(h, new AbortController().signal)
+    expect(round.issues).toBe(250)
+    expect(round.triggers).toBe(250)
     h.store.close()
   })
   it('skips a panel reply the panel handed over itself', async () => {
@@ -252,6 +312,18 @@ describe('the Redmine channel', () => {
     expect(await sendRedmine(h, message)).toBe('gone')
     vi.spyOn(Commands.prototype, 'http').mockRejectedValue(new Error('network down'))
     await expect(sendRedmine(h, message)).rejects.toThrow('network down')
+    h.store.close()
+  })
+  it('treats a refused write as gone, but a stale-object conflict as a retryable failure', async () => {
+    const h = host()
+    // Redmine refuses the note itself: the issue is locked, and no retry will take the note.
+    vi.spyOn(Commands.prototype, 'http').mockResolvedValue({ status: 422, body: '{"errors":["The issue is locked"]}' })
+    expect(await sendRedmine(h, message)).toBe('gone')
+    // A concurrent update raced the write: a retry settles it, so the failure is not a `gone`.
+    vi.spyOn(Commands.prototype, 'http').mockResolvedValue({ status: 422, body: '{"errors":[]}' })
+    await expect(sendRedmine(h, message)).rejects.toMatchObject({ code: 409 })
+    vi.spyOn(Commands.prototype, 'http').mockResolvedValue({ status: 422, body: '' })
+    await expect(sendRedmine(h, message)).rejects.toMatchObject({ code: 409 })
     h.store.close()
   })
 })

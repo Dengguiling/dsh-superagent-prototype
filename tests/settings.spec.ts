@@ -99,3 +99,19 @@ it('records nothing for a pause that changes nothing, refuses a sync while setup
   vi.mocked(Setup.prototype.configured).mockRestore()
   expect(() => settings.block('source:x')).toThrow(new UserError('unknownBlock', { block: 'source:x' }))
 })
+
+it('enqueues the shims rewrite in the save transaction, so a crash before the rewrite repairs itself', async () => {
+  h = await startRuntime()
+  const { settings, store } = h.runtime
+  const held = deferred<void>()
+  const blockCommands = vi.spyOn(Setup.prototype, 'blockCommands').mockImplementation(() => held.promise)
+  const executor = store.settings().executor
+  const saved = await settings.save('executor', { ...executor, blockedCommands: ['sudo'] }, store.blockRevision('executor'), 'panel')
+  expect(saved.restarting).toBe(false)
+  // The durable row waits until the rewrite runs; a crash here would leave it for the next start.
+  expect(h.runtime.effects.pending('shims', 'blocked')).toBe(true)
+  held.resolve()
+  await h.runtime.idle()
+  expect(h.runtime.effects.pending('shims')).toBe(false)
+  expect(blockCommands.mock.calls).toEqual([[['sudo']]])
+})

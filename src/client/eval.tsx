@@ -4,12 +4,12 @@ import { ADMISSION_DEFAULTS, ADMISSION_OPTIONS, type Admission, type AdmissionCe
 import type { AdmissionRowView } from '../sources/kind.ts'
 import { LIMITS } from '../limits.ts'
 import { DECISION_FILTERS, DECISION_KINDS, usePoll, type DecisionFilter, type Settings, type SourceView } from './api.ts'
-import { Button, DisclosureRow, Icon, InfoTip, Input, Pill, SegmentedControl, Switch } from './controls.tsx'
+import { Button, DisclosureRow, Icon, InfoTip, Input, Pill, SegmentedControl, SubTabs, Switch } from './controls.tsx'
 import { SaveBar } from './draft.tsx'
 import { useAction, usePanel } from './provider.tsx'
 import { DecisionLine } from './rows.tsx'
 import { ConfigHistory, Field, Fields, ModelField, SourceField, numberOf, useBlockDraft, useSettings } from './settings-kit.tsx'
-import { localized, valueLabel, when } from './text.ts'
+import { localized, newId, valueLabel, when } from './text.ts'
 import { Hint, LabelValue, ListTotal, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
 
 export function EvalStatus({ filter, window, paused }: { filter: DecisionFilter; window: '24h' | undefined; paused: boolean }) {
@@ -120,7 +120,8 @@ function AdmissionTable({ rows, labels, table, explicit, relation, onChange }: {
     </span></td>
   }
   const scope = (row: AdmissionRowView) => <td className="dt-admission-scope">{name(row)}<small>{localized(t, row.note)}</small></td>
-  const empty = (cell: AdmissionCell) => <td key={cell} className="dt-admission-na" aria-label={t('admissionNotReceived')}>—</td>
+  // A cell with no such scope holds an em dash and a visually hidden word for the screen reader (a `td` takes no aria-label).
+  const empty = (cell: AdmissionCell) => <td key={cell} className="dt-admission-na">—<span className="dt-sr">{t('admissionNotReceived')}</span></td>
   return <Section title={t('admission')} hint={t('admissionHint')}>
     <Hint>{explicit}</Hint>
     {relation ? <table className="dt-table dt-admission">
@@ -171,7 +172,7 @@ function PolicyBlock() {
     const fields = parts.find(source => source.id === id)?.policy?.fields.map(field => field.key) ?? []
     return Object.fromEntries(Object.entries(stored).filter(([key]) => key === 'admission' || fields.includes(key)))
   }
-  const add = () => insert({ id: crypto.randomUUID(), name: '', enabled: true, instruction: '' }, policy.rules.length)
+  const add = () => insert({ id: newId(), name: '', enabled: true, instruction: '' }, policy.rules.length)
   return <form className="dt-form dt-block" onSubmit={event => { void draft.submit(event) }}
     onInvalidCapture={event => reveal(event.target)}>
     <Fields disabled={draft.busy}>
@@ -186,18 +187,14 @@ function PolicyBlock() {
           expanded={expanded.has(rule.id)}
           onToggle={() => toggle(rule.id)} onChange={next => edit({ rules: policy.rules.map((item, position) => position === index ? next
             : item) })}
-          onDuplicate={() => insert({ ...rule, id: crypto.randomUUID(), name: `${rule.name}${t('copySuffix')}`.slice(0, LIMITS.ruleName) },
+          onDuplicate={() => insert({ ...rule, id: newId(), name: `${rule.name}${t('copySuffix')}`.slice(0, LIMITS.ruleName) },
             index + 1)}
           onRemove={() => edit({ rules: policy.rules.filter((_, position) => position !== index) })} />)}</ul>
             : <Hint>{t('rulesEmpty')}</Hint>}
       </Section>
       {current && <Section title={t('policyPerSource')} hint={t('policyPerSourceHint')}>
-        {parts.length > 1 && <div className="dt-subtabs" role="tablist" aria-label={t('policyPerSource')}>
-          {parts.map(source => <button key={source.id} type="button" role="tab" aria-selected={source === current} className="dt-subtab"
-            onClick={() => setTab(source.id)}>
-            {localized(t, source.title)}
-          </button>)}
-        </div>}
+        {parts.length > 1 && <SubTabs label={t('policyPerSource')} value={current.id} onChange={setTab}
+          items={parts.map(source => ({ value: source.id, label: localized(t, source.title) }))} />}
         <SourcePart key={current.id} source={current} part={part(current.id)}
           saved={(blocks.policy.value.sources[current.id] ?? {}) as Part} dirty={draft.dirty}
           reload={reload} onChange={next => edit({ sources: { ...policy.sources,

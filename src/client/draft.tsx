@@ -7,6 +7,8 @@ import { usePanel } from './provider.tsx'
 import { errorText, type T } from './text.ts'
 import { Button } from './controls.tsx'
 
+// Equality by JSON text: both sides come from the same host, whose serialization keeps the key order stable, so equal
+// values yield equal text (the same assumption as `same` in api.ts).
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const LIST_KEYS = ['id', 'chatId']
@@ -61,7 +63,7 @@ function read<V, M>(key: string | undefined): Stored<V, M> | undefined {
 
 export type DraftNotice = { kind: 'restored' | 'rebasing' } | { kind: 'merged'; revision: number }
   | { kind: 'conflict'; revision: number; paths: string[][] } | { kind: 'invalid'; fields: string[] }
-  | { kind: 'failed' | 'unstored'; error: string }
+  | { kind: 'failed' | 'unstored'; error: string } | { kind: 'stalledRestart' }
 const FAILURES: ReadonlySet<DraftNotice['kind']> = new Set(['conflict', 'invalid', 'failed', 'unstored'])
 export interface DraftState<V, M> {
   phase: 'clean' | 'editing' | 'saving' | 'awaitingRevision'
@@ -72,13 +74,13 @@ export interface DraftState<V, M> {
 }
 export type DraftAction<V, M> = { type: 'edit'; value: V; meta: M | undefined; saved: V; revision: number | undefined }
   | { type: 'discard' | 'submit' } | { type: 'saved'; revision: number; restarting: boolean } | { type: 'refused'; notice: DraftNotice }
-  | { type: 'revisionArrived'; saved: V; revision: number }
+  | { type: 'revisionArrived'; saved: V; revision: number } | { type: 'restartStalled' }
 /**
  * State machine for a settings draft.
  * Holds submitted values in `awaitingRevision` until the polled revision catches up, and rebases active edits onto newer remote revisions via `merge3`.
  */
 export function draftReducer<V, M>(state: DraftState<V, M>, action: DraftAction<V, M>): DraftState<V, M> {
-  const { phase, draft, seen } = state
+  const { phase, draft, seen, sent } = state
   switch (action.type) {
     case 'edit': {
       if (phase === 'saving' || phase === 'awaitingRevision') return state
@@ -104,6 +106,10 @@ export function draftReducer<V, M>(state: DraftState<V, M>, action: DraftAction<
       return { phase: 'editing', seen: revision, draft: { ...draft, base: saved, value, revision },
         notice: paths.length ? { kind: 'conflict', revision, paths } : { kind: 'merged', revision } }
     }
+    case 'restartStalled':
+      // The restart its save began never brought the server back: let the operator edit anyway, keeping what was sent
+      // as the shown value, and resolve the wait cleanly when the revision finally arrives.
+      return phase === 'awaitingRevision' ? { phase: 'clean', seen, sent, notice: { kind: 'stalledRestart' } } : state
   }
 }
 export interface DraftWords {
@@ -118,6 +124,7 @@ export function saveBarText(t: T, { phase, sent, notice }: DraftState<unknown, u
     case 'invalid': return { error: t('invalidSettings', { fields: notice.fields.join(t('listSeparator')) }), status: '' }
     case 'failed': return { error: notice.error, status: '' }
     case 'unstored': return { error: t('draftFailed', { error: notice.error }), status: '' }
+    case 'stalledRestart': return { status: t('restartStalled') }
     case 'merged': return { status: words.merged?.(notice.revision) ?? t('saveMerged') }
     case 'rebasing': return { status: t('saveRebasing') }
   }
@@ -142,6 +149,14 @@ export function useDraft<V, M = undefined>({ key, saved, revision, save, reload 
     return revision === undefined ? initial : draftReducer(initial, { type: 'revisionArrived', saved, revision })
   })
   if (state.phase !== 'saving' && revision !== undefined && revision !== state.seen) dispatch({ type: 'revisionArrived', saved, revision })
+  // A save that restarts the host waits in `awaitingRevision` for the polled revision to catch up. When the server
+  // never comes back, that wait would hold the fields disabled forever, so after a minute the block says so and
+  // lets the operator edit anyway; the wait still resolves if the revision arrives later.
+  useEffect(() => {
+    if (state.phase !== 'awaitingRevision' || !state.sent?.restarting) return
+    const timer = setTimeout(() => dispatch({ type: 'restartStalled' }), 60_000)
+    return () => clearTimeout(timer)
+  }, [state.phase, state.sent])
   useEffect(() => {
     if (!key) return
     try { if (state.draft) sessionStorage.setItem(key, JSON.stringify(state.draft)); else sessionStorage.removeItem(key) }
@@ -183,7 +198,8 @@ export function SaveBar({ state, dirty, busy, words, status, onDiscard, onSave }
 }) {
   const { t } = usePanel()
   const line = saveBarText(t, state, words)
-  const shown = dirty || busy || !!line.error
+  // A stalled restart leaves nothing to save yet, but the bar must still say so, hence the pinned notice.
+  const shown = dirty || busy || !!line.error || state.notice?.kind === 'stalledRestart'
   const bar = useRef<HTMLDivElement>(null)
   const block = useRef<HTMLElement | null>(null)
   const focused = useRef(false)

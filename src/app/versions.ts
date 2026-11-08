@@ -28,7 +28,17 @@ export class Versions<V extends { revision: number }> {
   }
   /** Stores a snapshot without advancing the current revision pointer (e.g., to record an initial built-in baseline). */
   keep(version: V): void { this.store.set(this.family(version.revision), version) }
+  /**
+   * The newest `limit` snapshots, newest first. The key names carry the revision number, so it selects the newest keys
+   * first and parses only the values it returns, instead of parsing the family's whole history to sort it.
+   */
   list(limit = Infinity): V[] {
-    return this.store.keys(this.family).flatMap(name => this.store.get(name) ?? []).sort((a, b) => b.revision - a.revision).slice(0, limit)
+    const prefix = this.family.prefix
+    const keys = this.store.keys(prefix)
+      .map(name => ({ name: name as Key<V>, revision: Number(name.slice(prefix.length)) }))
+      .filter(key => Number.isFinite(key.revision))
+      .sort((a, b) => b.revision - a.revision)
+      .slice(0, limit)
+    return keys.flatMap(key => { const value = this.store.get(key.name); return value ? [value] : [] })
   }
 }

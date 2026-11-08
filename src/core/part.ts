@@ -39,7 +39,7 @@ export abstract class EnginePart {
    * Eval or one on a Thread it follows for context, went to Eval without it.
    * @returns whether it was queued.
    */
-  protected handBack(ticketId: string, trigger: Trigger, reason: string): boolean {
+  protected recordHandback(ticketId: string, trigger: Trigger, reason: string): boolean {
     const decided = this.owners(trigger).includes(ticketId)
     const disposition = this.repo.triggers.disposition(trigger.id) ?? { fanout: [], at: this.now() }
     const handbacks = [...disposition.handbacks ?? [], { ticketId, reason, at: this.now() }]

@@ -80,7 +80,7 @@ export function CommandPalette({ onGroup, onPage, children }: {
     try {
       await call('POST executor/pause', { body: { paused: !paused } })
       await reloadOverview()
-    } catch (failure) { notify(errorText(failure)) }
+    } catch (failure) { notify(errorText(failure), 'error') }
   }, [call, notify, paused, reloadOverview])
   const commands = useMemo<Command[]>(() => {
     const list: Command[] = []
@@ -88,7 +88,7 @@ export function CommandPalette({ onGroup, onPage, children }: {
     list.push({ id: 'action:pause', label: t(paused ? 'resumeProcessing' : 'pauseProcessing'), hint: t('paletteAction'),
       run: () => { void togglePause() } })
     if (masterId) list.push({ id: 'action:master', label: t('openMaster'), hint: t('paletteAction'),
-      run: () => { openSession(masterId).catch(failure => notify(errorText(failure))) } })
+      run: () => { openSession(masterId).catch(failure => notify(errorText(failure), 'error')) } })
     // The groups, each with the pages it holds, the way the panel shows them.
     for (const group of GROUPS) {
       const groupLabel = t(`tab.group.${group}`)

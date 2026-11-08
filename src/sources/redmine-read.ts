@@ -18,6 +18,16 @@ export async function redmineApi<T>(commands: Commands, path: string, init: { me
     ...init.body !== undefined ? { body: JSON.stringify(init.body) } : {},
   })
   if (response.status === 401 || response.status === 403) throw new CliError(`Redmine refused the request to ${path}`, response.status)
+  if (response.status === 422) {
+    // Redmine answers 422 both for a refused write (`{"errors":[...]}`, such as a locked issue, which never takes the
+    // request) and for a stale-object conflict of a concurrent update (`errors` empty or no body), which a retry
+    // settles. The channel treats the refusal (422) as gone and the conflict (409) as retryable.
+    let refused = false
+    try { const body = JSON.parse(response.body) as { errors?: unknown[] }; refused = Array.isArray(body.errors) && body.errors.length > 0 }
+    catch { /* No JSON body: a stale-object conflict. */ }
+    if (!refused) throw new CliError(`Redmine reported a stale object for ${path}: the write races a concurrent update`, 409)
+    throw new CliError(`Redmine refused the request to ${path}: ${response.body.slice(0, 300)}`, 422)
+  }
   if (response.status < 200 || response.status >= 300) throw new CliError(`Redmine answered ${response.status} for ${path}: ${response.body.slice(0, 300)}`, response.status)
   // A write answers 204 with no body.
   if (!response.body.trim()) return undefined as T

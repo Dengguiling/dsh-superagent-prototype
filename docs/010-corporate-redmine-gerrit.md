@@ -9,7 +9,7 @@ This is the deployment of dsh-superagent in a company whose tasks live in Redmin
 5. The Gerrit Source finds that change by the trailer, in whichever repository it lives, and hands the review comments on it to the same worker.
 6. The developer, or the leader, reviews the change in the web UI of the review server, in the page the push printed; the leader gives it Code-Review +2 and merges it. The Ticket ends, and the outcome is written back to the Redmine issue as a note.
 
-In Gerrit the author of a change may not merge it: the review server asks for a review by somebody else. The merge is the leader's work.
+A change merges only when it carries a Code-Review +2 vote, and the leader is the one who gives that vote — the developer holds no submit right. The merge is the leader's work.
 
 The Sources, the prompt sections and the skills of this deployment are the built-in ones; only the account settings differ from the general deployment of [006 Deployment](006-deployment.md).
 
@@ -40,7 +40,7 @@ The passwords, the API keys and the addresses of the local environment are in th
 The superagent binds to the developer and to nobody else:
 
 - the Redmine account is `dev`, "开发工程师", and the Redmine Source takes the issues assigned to it;
-- the Gerrit account is `dev`, and the SSH address of the Source is `ssh://dev@localhost:29418`;
+- the Gerrit account is `dev`; the review server is reached at `http://localhost:8080`, and the SSH address the patches push to follows from it, `ssh://dev@localhost:29418`;
 - there is no account of the agent's own, in neither system.
 
 The developer does the work and the superagent helps the developer, so the superagent works in the developer's name: its notes on the issue, its commits and its pushes carry the developer's identity. The Source still tells the agent's notes and the panel's notes from a person's by markers, so the developer's own notes on an issue reach the agent as human input even though the account is shared.
@@ -77,13 +77,13 @@ Both Sources are configured under *Settings* → *Sources*.
 | Field | Meaning |
 | --- | --- |
 | Address | `http://gerrit.example.com:8080`, the HTTP address of the review server |
-| SSH address | `ssh://dev@gerrit.example.com:29418`, without the project; the agent appends the repository the issue names |
 | Project | An optional single-repository override; empty, the recommended setting, tracks the issue-referencing patches of every repository |
 | Account | The user name on Gerrit, here `dev`; a change belongs to the agent when this account owns it |
 | HTTP password | The account's HTTP password, used to read review comments; a credential |
 | SSH private key | The path of the key whose public key is registered with the account |
 | Commit email | The email Gerrit accepts; commit as it when the ticket names no author |
-| Target branch | The branch patches are pushed to, such as `main` |
+
+The table names no SSH address and no branch, because neither is configured: the SSH address the agent pushes to follows from the HTTP address (`ssh://<host>:29418`), and the branch a patch proposes against is the branch of the change its ticket works on.
 
 Saving either Source restarts dsh-superagent, which checks the accounts: the Redmine key against `/users/current.json`, and the Gerrit account against the review server, with the project checked too when one is set. A Source whose account does not answer stays off, and the panel says why.
 
@@ -162,7 +162,7 @@ The host binds that change to the Ticket, so the review comments on it reach the
 | The push fails with `Too many authentication failures` | The worker offers the keys of the SSH agent before the configured one. dsh-superagent writes `-o IdentitiesOnly=yes`, so the configured key is the only one offered |
 | The change is not bound to the Ticket | Its commit message names no issue and its topic does not carry the ticket's name. Add the `Issue:` trailer with the Redmine issue number, or push under the ticket's topic; a configured Gerrit project also hides the repository if it names another one |
 | The review comments do not reach the worker | The comments are on a change whose commit message names no issue, or the author is not on the Gerrit list. Both must hold |
-| The developer may not merge the patch | Gerrit asks for a review by somebody else: the author of a change may not submit it. The leader reviews the change, gives it Code-Review +2 and merges it |
+| The developer may not merge the patch | Merging needs the Code-Review +2 vote, and only the leader gives it: the developer holds no submit right. The leader reviews the change, votes Code-Review +2 and merges it |
 | The push is refused with `same Change-Id in multiple changes` | The branch carries a second commit with the same `Change-Id`. Amend the commit instead of adding one |
 | The worker's git asks for a host key | dsh-superagent writes `core.sshCommand` with `StrictHostKeyChecking=no`; a worker that pushes outside its Ticket directory does not use it |
 | The sign-in page does not open a system | The role has no account yet, or the stack is not up. `accounts.sh` of the environment provisions the roles of the company, and its README lists the addresses |

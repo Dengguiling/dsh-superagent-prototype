@@ -6,7 +6,7 @@ import type { FieldSpec, Localized } from '../sources/kind.ts'
 import { usePoll, type HistoryView, type Settings, type SettingsView, type SourceView } from './api.ts'
 import { Button, DisclosureRow, Icon, InfoTip, Input, SegmentedControl, Switch } from './controls.tsx'
 import { useDraft } from './draft.tsx'
-import { useAction, usePanel, usePanelData } from './provider.tsx'
+import { useAction, usePanel, usePanelData, type PanelContext } from './provider.tsx'
 import { settingsRoute } from './route.ts'
 import { errorText, localized, valueLabel, when, type T } from './text.ts'
 import { Hint, LoadState } from './widgets.tsx'
@@ -69,11 +69,17 @@ function SwitchRow({ label, hint, checked,
   </div>
 }
 type RoleModel = Settings['eval']['model']
+type ModelsView = ApiResponse<'GET models'>
+// One shared read of the model catalog: a settings page can render several ModelFields, and each would otherwise ask
+// the host for the same list. A failed read is dropped so the next field to mount tries again.
+let models: Promise<ModelsView> | undefined
+const readModels = (call: PanelContext['call']): Promise<ModelsView> => (models ??= call('GET models')
+  .catch(failure => { models = undefined; throw failure }))
 export function ModelField({ id, value, onChange }: { id: string; value: RoleModel; onChange: (next: RoleModel) => void }) {
   const { t, call } = usePanel()
-  const [catalog, setCatalog] = useState<ApiResponse<'GET models'>>()
+  const [catalog, setCatalog] = useState<ModelsView>()
   const [error, setError] = useState<string>()
-  useEffect(() => { call('GET models').then(setCatalog, failure => setError(errorText(failure))) }, [call])
+  useEffect(() => { readModels(call).then(setCatalog, failure => setError(errorText(failure))) }, [call])
   const current = { provider: value?.provider ?? '', model: value?.model ?? '', effort: value?.reasoningEffort ?? '' }
   const set = (next: Partial<typeof current>) => {
     const { provider, model, effort } = { ...current, ...next }
@@ -175,7 +181,7 @@ function RowsField({ field, value, saved, onChange, labels, refreshLabels }: {
     try {
       const added = await refreshLabels!()
       notify(added.length ? t('labelsAdded', { names: added.join(t('listSeparator')) }) : t('labelsCurrent'))
-    } catch (failure) { notify(t('labelsFailed', { error: errorText(failure) })) }
+    } catch (failure) { notify(t('labelsFailed', { error: errorText(failure) }), 'error') }
   })
   const label = localized(t, field.label), hint = localized(t, field.hint)
   const rows = Array.isArray(value) ? value as Row[] : []
@@ -229,7 +235,11 @@ function RowsField({ field, value, saved, onChange, labels, refreshLabels }: {
       {open ? t('collapse') : rows.map(rowName).join(t('listSeparator'))}
     </button>}
     {(rows.length <= ROWS_SHOWN || open) && <ul className="dt-rows"
-      style={{ ['--dt-columns' as string]: field.columns.length }}>{rows.map((row, index) => <li key={index} className="dt-rows-item">
+      style={{ ['--dt-columns' as string]: field.columns.length }}>{rows.map((row, index) =>
+      // A row the server already keeps is keyed by the id it knows (its key column reads back read-only), so a re-read
+      // keeps it in place. A row still being typed has no stable id — its key column may be edited character by
+      // character — so it keeps its position and stays mounted while the operator works on it.
+      <li key={savedKeys.has(row[key.key] ?? '') ? row[key.key] : `index-${index}`} className="dt-rows-item">
       {field.columns.map(column => cell(row, index, column))}
       <Button variant="ghost" size="sm" icon={<Icon name="trash" />} aria-label={t('removeRow', { name: labels[row[key.key] ?? '']
         || row[key.key] || label })}

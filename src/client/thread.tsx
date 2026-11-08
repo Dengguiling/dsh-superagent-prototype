@@ -81,7 +81,7 @@ function useThreadTimeline(key: string, target: string | undefined) {
     let active = true
     call('GET threads/:key', { key, query: { limit: PAGE, around: target } }).then(page => {
       if (active) setOlder({ triggers: page.timeline, cursor: page.earlier })
-    }, (failure: unknown) => { if (active) notify(errorText(failure)) })
+    }, (failure: unknown) => { if (active) notify(errorText(failure), 'error') })
     return () => { active = false }
   }, [missing, call, key, target, notify])
   const gap = !!newest && gapBetween(newest, older)
@@ -96,7 +96,7 @@ function useThreadTimeline(key: string, target: string | undefined) {
       }
       if (active) setOlder({ triggers: byTime([...older.triggers, ...run]), cursor: overlaps(run, older.triggers) ? older.cursor : cursor })
     }
-    fill().catch((failure: unknown) => { if (active) notify(errorText(failure)) })
+    fill().catch((failure: unknown) => { if (active) notify(errorText(failure), 'error') })
     return () => { active = false }
   }, [gap, newest, older, call, key, notify])
   const earlier = useAction(async (shown: ThreadPageView) => {

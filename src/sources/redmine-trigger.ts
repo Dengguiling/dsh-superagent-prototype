@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { key, type ChannelRef, type Trigger } from '../core/index.ts'
-import { escapeRegExp, sameName } from '../infra/text.ts'
+import { escapeRegExp } from '../infra/text.ts'
 
 export const SOURCE = 'redmine'
 /** Redmine reply address: the issue a journal is added to. */
@@ -84,12 +84,11 @@ export const agentMarker = (id: string): string => `<!-- dsh-superagent:${id} --
 /** The hidden marker of a note the operator posted from the panel; `id` is a token unique to that reply. */
 export const panelMarker = (id: string): string => `<!-- dsh-superagent-panel:${id} -->`
 const AGENT_NOTE = /<!--\s*dsh-superagent:[^>]*-->/
-const PANEL_NOTE = /<!--\s*dsh-superagent-panel:[^>]*-->/
 const PANEL_MARKER = /<!--\s*dsh-superagent-panel:[^>]*-->/
 /** True when the notes carry the marker of an outbound reply the agent sent, which the Source has already delivered. */
 export const agentNote = (notes: string): boolean => AGENT_NOTE.test(notes)
 /** True when the notes carry the marker of a panel reply. */
-export const panelNote = (notes: string): boolean => PANEL_NOTE.test(notes)
+export const panelNote = (notes: string): boolean => PANEL_MARKER.test(notes)
 /** The token of a panel reply, which tells two notes of the operator apart; undefined when the notes carry none. */
 export const panelToken = (notes: string): string | undefined =>
   /<!--\s*dsh-superagent-panel:([^>]+?)-->/.exec(notes)?.[1]?.trim() || undefined
@@ -130,15 +129,17 @@ export function issueTrigger(issue: RedmineIssue, agent: { id: number; login: st
 }
 /**
  * Builds the Trigger of one journal of an issue: the note a person wrote, or the field changes Redmine recorded. A note the
- * agent wrote carries a hidden marker and was already delivered when it was written, so it produces no Trigger; every other
- * note is human input, including the operator's own on the shared account.
+ * agent's own account wrote that carries a hidden marker was already delivered when it was written, so it produces no
+ * Trigger; marker text another account pastes marks nothing, because only the agent's account can write its own markers.
+ * Every other note is human input, including the operator's own on the shared account.
  */
 export function journalTrigger(issue: RedmineIssue, journal: RedmineJournal, agent: { id: number; login: string }, baseUrl: string,
   project?: string, { panel = false }: { panel?: boolean } = {}): Trigger | undefined {
   const notes = journal.notes ?? ''
+  const own = !!agent.id && journal.user?.id === agent.id
   // A panel reply is skipped, because the panel handed it to the agent itself; the Source delivers it only when that
   // hand-off did not happen.
-  if (agentNote(notes) || (panelNote(notes) && !panel)) return undefined
+  if ((agentNote(notes) && own) || (panelNote(notes) && !panel && own)) return undefined
   // The marker of a panel reply is for the Source, not for the agent.
   const text = panel ? journalText(journal).replace(PANEL_MARKER, '').trim() : journalText(journal)
   if (!text) return undefined

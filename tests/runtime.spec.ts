@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { lockSync } from 'proper-lockfile'
 import { Runtime } from '../src/app/runtime.ts'
 import { jobRegistry } from './fixtures/host.ts'
 import { evalsHealth } from '../src/app/views/overview.ts'
@@ -1007,7 +1008,12 @@ it('waits for setup when the shim directory holds a file dsh-superagent did not 
 
 it('rewrites the blocked-command shims when the Executor settings change them, without a restart', async () => {
   const bin = join(directory, 'worker-bin')
-  const save = (blockedCommands: string[]) => runtime.settings.save('executor', { ...runtime.store.settings().executor, blockedCommands }, runtime.store.blockRevision('executor'), 'panel')
+  const save = async (blockedCommands: string[]) => {
+    const result = await runtime.settings.save('executor', { ...runtime.store.settings().executor, blockedCommands }, runtime.store.blockRevision('executor'), 'panel')
+    // The rewrite runs as a durable `shims` effect, so the save returns before the shims are on disk.
+    await runtime.idle()
+    return result
+  }
   expect(await save(['personal-cli'])).toMatchObject({ saved: true, restarting: false })
   expect(readdirSync(bin).sort()).toEqual(['lark-cli', 'personal-cli'])
   await save([])
@@ -1381,6 +1387,44 @@ it('refuses a second process on the same state directory before it opens the dat
   expect(() => new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn())).toThrow(/already being held/)
   expect(runtime.store.get(KV.store.schema)).toBe(10)
   runtime.store.set(KV.store.schema, SCHEMA_VERSION)
+})
+
+it('waits out a state directory lock a SIGKILLed process holds for its stale window, then starts', async () => {
+  await runtime.stop()
+  const held = lockSync(directory)
+  const context = () => { const ctx = new Context(); for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service); return ctx }
+  // The lock goes away while `Runtime.create` waits, as a killed process's lock does once its stale window passes.
+  const timer = setTimeout(() => { held() }, 500); timer.unref?.()
+  runtime = await Runtime.create(context(), testMachine({ stateDir: directory }), vi.fn())
+  await runtime.ready
+})
+
+it('prunes the settled receipts once a day through its pass, and no more within that day', async () => {
+  await runtime.ready
+  runtime.store.set(KV.runtime.receiptPrunedAt, new Date(Date.now() - 2 * 86_400_000).toISOString())
+  await runtime.pump()
+  expect(Date.parse(runtime.store.get(KV.runtime.receiptPrunedAt)!)).toBeGreaterThan(Date.now() - 60_000)
+  const at = runtime.store.get(KV.runtime.receiptPrunedAt)
+  await runtime.pump()
+  expect(runtime.store.get(KV.runtime.receiptPrunedAt)).toBe(at)
+})
+
+it('keeps a notice pending while resolving the main Session fails, and settles a missing main Session quietly', async () => {
+  runtime.sessions.notify('prompts', { revision: 2 }, 'Prompts changed')
+  await runtime.idle()
+  const injected = () => agents.get(runtime.masterId)!.inject.mock.calls.some(([message]) =>
+    String((message as { id: string }).id).includes('notice:prompts'))
+  expect(injected()).toBe(true)
+  // A transient failure of the session controller must not drop the notice: its effect row stays for a retry.
+  runtime.sessions.notify('prompts', { revision: 3 }, 'Prompts changed')
+  controller.resolveAgent.mockImplementationOnce(async () => ({ error: { code: 'gateway/internal', message: 'gateway is down' } }))
+  await runtime.idle()
+  expect(runtime.effects.pending('notice', 'prompts')).toBe(true)
+  // A main Session that does not exist yet is the documented silent no-op, and settles the notice.
+  controller.resolveAgent.mockImplementationOnce(async () => ({ error: { code: 'session/not-found' } }))
+  runtime.sessions.notify('prompts', { revision: 3 }, 'Prompts changed')
+  await runtime.idle()
+  expect(runtime.effects.pending('notice', 'prompts')).toBe(false)
 })
 
 it('applies a changed prompt size limit to the next save and request without a restart', async () => {

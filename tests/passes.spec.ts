@@ -4,11 +4,12 @@ import { Passes } from '../src/app/passes.ts'
 import type { Trigger } from '../src/core/index.ts'
 import { HealthBoard } from '../src/infra/health.ts'
 
-function passes(closing = () => false) {
+function passes(closing = () => false, pruneReceipts?: () => void) {
   const health = new HealthBoard().claim('runtime', { state: 'starting', detail: '' })
   const engine = { receive: vi.fn(() => 'stored' as const), evaluateDue: vi.fn() }
   const effects = { kick: vi.fn(), idle: vi.fn(async () => {}) }
-  const value = new Passes({ engine, effects, health, lifetime: new AbortController().signal, configured: () => true, closing })
+  const value = new Passes({ engine, effects, health, lifetime: new AbortController().signal, configured: () => true, closing,
+    ...pruneReceipts ? { pruneReceipts } : {} })
   return { passes: value, engine, effects, health }
 }
 const trigger = { id: 't1', source: 'feishu', threads: [{ source: 'feishu', id: 'oc_1:om_1' }], actor: { source: 'feishu', id: 'ou_a' }, human: true,
@@ -53,4 +54,13 @@ it('starts no timer once stopped, as a start-up that ends after a stop asks', as
     await vi.advanceTimersByTimeAsync(10_000)
     expect(h.engine.evaluateDue).not.toHaveBeenCalled()
   } finally { vi.useRealTimers() }
+})
+
+it('runs each pass\'s maintenance, such as the receipt prune, once per pass', async () => {
+  const pruneReceipts = vi.fn()
+  const h = passes(() => false, pruneReceipts)
+  await h.passes.pump()
+  expect(pruneReceipts).toHaveBeenCalledOnce()
+  await h.passes.pump()
+  expect(pruneReceipts).toHaveBeenCalledTimes(2)
 })

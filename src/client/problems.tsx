@@ -60,13 +60,29 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
   }
 }
 
+/**
+ * A stable identity for one problem row: its kind plus the record it is about, so a re-read keys the rows alike and
+ * React keeps a row in place instead of rebuilding the list.
+ */
+const problemKey = (problem: Problem): string => {
+  switch (problem.kind) {
+    case 'setup': return `setup/${problem.place}`
+    case 'runtime-error': return `runtime/${problem.name}`
+    case 'source-error': return `source/${problem.source.id}`
+    case 'eval-overdue': return `eval-overdue/${problem.thread.key}`
+    case 'eval-unavailable': return `eval/${problem.decisionId}`
+    case 'outgoing': return `outgoing/${problem.outgoing.id}`
+    default: return problem.kind
+  }
+}
+
 /** The system problems, with the step that fixes each one. */
 export function SystemProblems() {
   const { t } = usePanel()
   const { overview, reloadOverview } = usePanelData()
   if (!overview?.problems.length) return null
   return <Section title={t('problems')} count={overview.problems.length}>
-    <ul className="dt-list dt-cards">{overview.problems.map((problem, index) => <ProblemLine key={index} problem={problem}
+    <ul className="dt-list dt-cards">{overview.problems.map(problem => <ProblemLine key={problemKey(problem)} problem={problem}
       onChanged={reloadOverview} />)}</ul>
   </Section>
 }

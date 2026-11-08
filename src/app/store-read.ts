@@ -36,8 +36,11 @@ export function storeReads(db: DatabaseSync) {
     return values<Trigger>(`SELECT t.value FROM trigger_thread x JOIN trigger t ON t.id = x.id WHERE x.thread = ? ${place}
       ORDER BY x.at DESC, x.id DESC LIMIT ?`, threadKeyValue, ...before ? [before.at, before.id] : [], limit).reverse()
   },
+  // The tie-breaker is `x.id`, the same column the cursor seeks on (`(x.at, x.id) < (?, ?)` in `threadTriggers`), so
+  // offset pagination (`threadPage`) and cursor pagination agree on one order. Ordering by `t.rowid` instead would let a
+  // page boundary between two triggers of the same `at` repeat or skip them across the two paginations.
   threadPage: (threadKeyValue: string, offset: number, limit: number): Trigger[] => values(`SELECT t.value FROM trigger_thread x
-    JOIN trigger t ON t.id = x.id WHERE x.thread = ? ORDER BY x.at DESC, t.rowid DESC LIMIT ? OFFSET ?`, threadKeyValue, limit, offset),
+    JOIN trigger t ON t.id = x.id WHERE x.thread = ? ORDER BY x.at DESC, x.id DESC LIMIT ? OFFSET ?`, threadKeyValue, limit, offset),
   /** Nearest non-CI triggers on a thread immediately before and after `(at, id)`. */
   neighbours: (threadKeyValue: string, at: string, id: string): { before?: Trigger; after?: Trigger } => {
     const nearest = (side: '<' | '>') => values<Trigger>(`SELECT t.value FROM trigger_thread x JOIN trigger t ON t.id = x.id

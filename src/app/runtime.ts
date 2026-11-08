@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import { mkdirSync } from 'node:fs'
+import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
@@ -84,13 +84,41 @@ export class Runtime extends Service implements SourceHost {
   private readonly toolHost: MainToolsHost & ExecutorToolsHost
   /** Non-zero while a main-Session tool is executing an Engine command, suppressing self-triggered domain event notices. */
   private quiet = 0
-  constructor(ctx: Context, readonly machine: Machine, restart: () => void) {
-    super(ctx, 'orchestrator')
-    const runtime = this
-    // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
+  /**
+   * Constructs the Runtime, waiting out the state directory lock of a SIGKILLed process: `proper-lockfile` reports it
+   * `ELOCKED` for its whole 30-second stale window, and an `apply` that gave up at once would fail every restart until
+   * then. Retries every 2 seconds for 30 seconds in total, then rethrows the last error.
+   */
+  static async create(ctx: Context, machine: Machine, restart: () => void): Promise<Runtime> {
+    const deadline = Date.now() + 30_000
+    for (;;) {
+      try { return new Runtime(ctx, machine, restart) }
+      catch (error) {
+        if ((error as { code?: unknown })?.code !== 'ELOCKED' || Date.now() >= deadline) throw error
+        await new Promise(resolve => { setTimeout(resolve, 2000) })
+      }
+    }
+  }
+  /**
+   * A bare declaration rather than a parameter property: the lock below runs before `super`, and a parameter property's
+   * assignment would be hoisted above it, touching `this` first.
+   */
+  readonly machine: Machine
+  constructor(ctx: Context, machine: Machine, restart: () => void) {
+    // Lock the state directory before registering the service and opening the database, so another process cannot
+    // migrate or write concurrently and a contended directory fails before anything exists to clean up: an `ELOCKED`
+    // here has registered no service and opened no Store, which lets `Runtime.create` simply construct again.
     mkdirSync(machine.stateDir, { recursive: true, mode: 0o700 })
-    const compromised = (error: Error) => { this.runtimeHealth.set({ state: 'error', detail: error.message }); this.stopped.abort() }
-    const release = lockSync(machine.stateDir, { stale: 30_000, onCompromised: compromised })
+    // A directory an earlier build (or hand) created may be looser than the mode above, which applies only on creation.
+    try { chmodSync(machine.stateDir, 0o700) } catch { /* A filesystem that refuses the chmod keeps its own mode. */ }
+    const compromised: { run?: (error: Error) => void } = {}
+    const release = lockSync(machine.stateDir, { stale: 30_000, onCompromised: error => compromised.run?.(error) })
+    try { super(ctx, 'orchestrator') }
+    catch (error) { release(); throw error }
+    const runtime = this
+    this.machine = machine
+    // The lock reports a compromise only while it is held, by which time the construction above has finished.
+    compromised.run = (error: Error) => { this.runtimeHealth.set({ state: 'error', detail: error.message }); this.stopped.abort() }
     this.releaseLock = async () => { release() }
     let opened: Store | undefined
     try {
@@ -106,12 +134,15 @@ export class Runtime extends Service implements SourceHost {
       const commands = this.commands = new Commands(() => setup.deployment, setup.commandEnvironment, this.lifetime)
       const board = this.board
       const effects = this.effects = new Effects(store, board)
+      // Rewrite the workers' command shims from a durable effect, so a crash between a settings save and the rewrite
+      // repairs itself here on the next start instead of leaving stale shims running until someone saves again.
+      effects.handle('shims', ({ blocked }) => setup.blockCommands(blocked))
       const sources = this.sources = new SourceRegistry(() => store.settings(), board, kind => {
         // Sync source member lists once startup completes when a source plugin loads dynamically.
         if (kind.policy?.sync) void this.ready?.then(() => this.settings.syncable().includes(kind.kind) ? this.settings.sync(kind.kind) : undefined)
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
-      })
+      }, message => ctx.logger.warn('dsh-superagent: %s', message))
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
@@ -124,7 +155,7 @@ export class Runtime extends Service implements SourceHost {
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
-        sourceHost: this, setup, requestPass: () => { this.passes.request() } })
+        effects, sourceHost: this, setup, requestPass: () => { this.passes.request() } })
       this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
@@ -160,7 +191,8 @@ export class Runtime extends Service implements SourceHost {
       const evals = board.claim('evals', { state: 'ready', detail: 'No unavailable Eval in the last hour' })
       const evaluateDue = () => { engine.evaluateDue(); evals.set(evalsHealth(store)) }
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
-        health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
+        health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing(),
+        pruneReceipts: () => { this.pruneReceipts() } })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
@@ -204,6 +236,14 @@ export class Runtime extends Service implements SourceHost {
   private closing(): boolean { return this.closingFlag }
   /** Hold evaluation, dispatch, and outbound delivery while paused or awaiting setup; sources still record incoming triggers. */
   private paused(): boolean { return !this.setup.configured() || this.store.settings().paused }
+  /** Prunes the Outbox's settled receipts older than 30 days, at most once a day through the pass scheduler. */
+  private pruneReceipts(): void {
+    const last = this.store.get(KV.runtime.receiptPrunedAt)
+    if (last !== undefined && Date.now() - Date.parse(last) < 86_400_000) return
+    const pruned = this.store.receipts.prune(new Date(Date.now() - 30 * 86_400_000).toISOString())
+    this.store.set(KV.runtime.receiptPrunedAt, now())
+    if (pruned) this.ctx.logger.info('dsh-superagent pruned %d settled receipts older than 30 days', pruned)
+  }
   private async initialize(): Promise<void> {
     // Register management HTTP routes before setup completes so operators can fix setup problems in the UI.
     this.disposers.push(registerHttp(this.ctx, this.httpHost()))

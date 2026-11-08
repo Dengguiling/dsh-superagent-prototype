@@ -45,6 +45,8 @@ export const ChangeSchema = z.looseObject({
   subject: z.string().nullish(), topic: z.string().nullish(), status: z.string().nullish(),
   owner: AccountSchema.nullish(), created: z.string().nullish(), updated: z.string().nullish(), url: z.string().nullish(),
   current_revision: z.string().nullish(),
+  // Set on the last change of a list while more of the query's matches follow, which pagination reads with `start`.
+  _more_changes: z.boolean().nullish(),
   revisions: z.record(z.string(), RevisionSchema).nullish(),
   messages: z.array(z.looseObject({ id: z.string().nullish(), message: z.string().nullish(), author: AccountSchema.nullish(),
     real_author: AccountSchema.nullish(), date: z.string().nullish() })).nullish(),
@@ -59,10 +61,11 @@ export const CommentSchema = z.looseObject({
 })
 export type GerritComment = z.infer<typeof CommentSchema>
 
-export interface ChangeQuery { project?: string; owner?: string; status?: string; limit?: number }
+export interface ChangeQuery { project?: string; owner?: string; status?: string; limit?: number; start?: number }
 /**
  * Lists the changes matching the query, with their current revision, its commit message, and their labels. Gerrit's
- * query language joins terms with a space, and every term must hold.
+ * query language joins terms with a space, and every term must hold. `start` reads a later page of the same query;
+ * the last change of the answer carries `_more_changes` while more pages follow.
  */
 export async function listChanges(commands: Commands, query: ChangeQuery, tally?: Tally): Promise<GerritChange[]> {
   const terms = [
@@ -72,7 +75,7 @@ export async function listChanges(commands: Commands, query: ChangeQuery, tally?
   ]
   // The terms are joined with `%20` rather than `+`, which a servlet would read as a space only by convention.
   const search = terms.map(encodeURIComponent).join('%20')
-  const url = `/changes/?q=${search}&o=CURRENT_REVISION&o=CURRENT_COMMIT&o=DETAILED_LABELS&n=${query.limit ?? 100}`
+  const url = `/changes/?q=${search}&o=CURRENT_REVISION&o=CURRENT_COMMIT&o=DETAILED_LABELS&n=${query.limit ?? 100}&start=${query.start ?? 0}`
   const body = await gerritApi<unknown[]>(commands, url)
   return validItems(ChangeSchema, body, tally)
 }

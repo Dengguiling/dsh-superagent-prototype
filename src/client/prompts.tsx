@@ -8,7 +8,7 @@ import { changedSections, isPart, isSkill, lineDiff, partKey, partText, partWith
 import { useAction, usePanel } from './provider.tsx'
 import { errorText, valueLabel, when, type T } from './text.ts'
 import { Hint, LoadState } from './widgets.tsx'
-import { Button, Icon, Input, SegmentedControl } from './controls.tsx'
+import { Button, Icon, Input, SegmentedControl, SubTabs } from './controls.tsx'
 
 type Tab = 'edit' | 'full' | 'history'
 type Origin = { revision: number } | 'defaults' | { reset: string }
@@ -55,15 +55,15 @@ function PromptsEditor({ view, reload }: { view: PromptsView; reload: () => Prom
     { value: 'history' as const, label: t('promptViewHistory') }]
   const removed = view.defaultChanged.filter(item => item.removed).map(item => item.part)
   return <div className="dt-form">
-    <div className="dt-subtabs" role="tablist" aria-label={t('promptViews')}>{tabs.map(item => <button key={item.value} type="button"
-      role="tab" className="dt-subtab" aria-selected={tab === item.value} onClick={() => setTab(item.value)}>{item.label}</button>)}</div>
+    <SubTabs label={t('promptViews')} value={tab} onChange={setTab}
+      items={tabs.map(item => ({ value: item.value, label: item.label }))} />
     {removed.length > 0 && <Hint>{t('promptRemovedParts', { parts: removed.join(t('listSeparator')) })}</Hint>}
     {tab === 'edit' && <PromptSections config={config} view={view} changed={changed} selected={selected} onSelect={select} onEdit={edit} />}
     {tab === 'full' && <FullPrompt config={config} view={view} dirty={draft.dirty} revision={draft.revision} onEdit={open} />}
     {tab === 'history' && <PromptHistory key={view.revision} view={view} from={draft.meta?.from}
       onLoad={(next, from) => edit(withOverrides(next, view.parts), { from })} />}
     <SaveBar {...draft} words={words} onSave={() => { void draft.submit() }}
-      onDiscard={() => { draft.discard(); reload().catch(failure => notify(errorText(failure))) }} />
+      onDiscard={() => { draft.discard(); reload().catch(failure => notify(errorText(failure), 'error')) }} />
   </div>
 }
 
@@ -188,11 +188,16 @@ function FullPrompt({ config, view, dirty, revision, onEdit }: {
   const [error, setError] = useState<Error>()
   useEffect(() => {
     let active = true
-    call('POST prompts/preview', { body: config }).then(value => { if (active) { setPreview({ config, value }); setError(undefined) } },
-      (failure: Error) => { if (active) setError(failure) })
-    return () => { active = false }
+    // One preview per pause in editing: the request waits half a second, and every change of the draft (each keystroke,
+    // or a re-render that recomposes the config) clears the pending one, so a burst sends a single call.
+    const timer = setTimeout(() => {
+      call('POST prompts/preview', { body: config }).then(value => { if (active) { setPreview({ config, value }); setError(undefined) } },
+        (failure: Error) => { if (active) setError(failure) })
+    }, 500)
+    return () => { active = false; clearTimeout(timer) }
   }, [call, config])
-  if (!preview || error) return <LoadState loading error={error} />
+  // Without a preview yet the whole view waits; once one is shown, a failed refresh keeps it and says so in a line.
+  if (!preview) return <LoadState loading error={error} />
   const shown = dirty ? compare : 'default'
   // A built-in skill is a built-in part, by its key.
   const team = isSkill(target) && Object.hasOwn(preview.config.skills, target.slice(6))
@@ -201,6 +206,7 @@ function FullPrompt({ config, view, dirty, revision, onEdit }: {
     : preview.value.parts[target]
   const builtIn = (key: string) => view.parts.find(part => part.key === key)
   return <>
+    {error && <p className="dt-error" role="alert">{t('previewFailed', { error: errorText(error) })}</p>}
     <div className="dt-subhead">
       <select className="dt-select dt-inline-select" aria-label={t('promptPreviewTarget')} value={target}
         onChange={event => setTarget(event.target.value as Target)}>

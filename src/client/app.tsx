@@ -29,6 +29,8 @@ export interface AppProps {
 
 function Glossary({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = usePanel()
+  // The language is read from the dictionary by comparing one known key: the panel carries exactly two dictionaries,
+  // zh and en, and the translator offers no language of its own to ask.
   const chinese = t('tab.group.inbox') === zh['tab.group.inbox']
   const [own, other] = chinese ? [zh, en] : [en, zh]
   const heading = (group: keyof typeof GLOSSARY) => t(group === 'roles' ? 'glossaryGroup.roles' : `tab.${group}`)
@@ -121,7 +123,7 @@ function Header() {
     if (!text) { show(); return }
     const request = ++latest.current
     call('GET search', { query: { q: text } }).then(value => { if (request === latest.current) setResult({ query: text, value }) },
-      failure => { if (request === latest.current) notify(errorText(failure)) })
+      failure => { if (request === latest.current) notify(errorText(failure), 'error') })
   }
   return <header className="dt-head">
     <div className="dt-head-title"><h1 className="dt-title">{t('title')}</h1></div>
@@ -139,12 +141,10 @@ function Header() {
   </header>
 }
 
-function Pages({ route, openGroup, openPage, deploymentForm }: { route: Route; openGroup: (group: Group) => void
-  openPage: (page: Page) => void; deploymentForm: DeploymentForm }) {
+function Pages({ route, openGroup, deploymentForm }: { route: Route; openGroup: (group: Group) => void; deploymentForm: DeploymentForm }) {
   const { t, navigate, drafts } = usePanel()
   const { state, error, reload } = usePanelData()
   const group = groupOf(route.page)
-  const pages = GROUP_PAGES[group]
   // A setting that waits to be saved marks the Settings group, so the operator knows it is not written yet.
   const unsaved = Object.keys(drafts).length > 0
   // Keep the active tab scrolled into view on narrow screens when routes change via links.
@@ -174,12 +174,10 @@ function Pages({ route, openGroup, openPage, deploymentForm }: { route: Route; o
       <SignalRail onOpenWaiting={() => navigate({ page: 'pms', query: { filter: 'waiting' } })}
         onOpenProblems={() => navigate({ page: 'pipeline' })} />
       {error && state && <p className="dt-error" role="status">{error.message}</p>}
-      {/* The three destinations of the panel; the pages of the current one sit below them. */}
+      {/* The three destinations of the panel; each holds one page, which the tab itself opens. */}
       <SegmentedTabs className="dt-grouptabs" label={t('pagesLabel')} value={group} onChange={openGroup}
         items={GROUPS.map(value => ({ value, label: t(`tab.group.${value}`), id: `dt-tab-${value}`, panelId: 'dt-page' }))} />
-      {pages.length > 1 && <SegmentedTabs className="dt-pagetabs" label={t('pagesLabel')} value={route.page} onChange={openPage}
-        items={pages.map(value => ({ value, label: t(`tab.${value}`), id: `dt-subtab-${value}`, panelId: 'dt-page' }))} />}
-      <main id="dt-page" role="tabpanel" aria-labelledby={pages.length > 1 ? `dt-subtab-${route.page}` : `dt-tab-${group}`}
+      <main id="dt-page" role="tabpanel" aria-labelledby={`dt-tab-${group}`}
         className="dt-main">{page}</main>
     </div>
   </div>
@@ -204,7 +202,7 @@ export function App({ t, openSession, deploymentForm }: AppProps) {
   const backLabel = location.stack.length ? routeLabel(t, location.stack.at(-1)!) : ''
   return <PanelProvider t={t} openSession={openSession} navigate={navigate} back={back} backLabel={backLabel}>
     <CommandPalette onGroup={openGroup} onPage={openPage}>
-      <Pages route={location.route} openGroup={openGroup} openPage={openPage} deploymentForm={deploymentForm} />
+      <Pages route={location.route} openGroup={openGroup} deploymentForm={deploymentForm} />
     </CommandPalette>
   </PanelProvider>
 }

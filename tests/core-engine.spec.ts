@@ -557,6 +557,22 @@ describe('follow-up owners', () => {
       expect(h.repo.tickets.get(ticketId)!.ended).toMatchObject({ outcome: 'merged' })
     }
   })
+  it('keeps a thread that ended merged closed when a resumed ticket binds it again', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.bindThread(ticketId, { source: 'gh', id: 'pr-9' }, true)
+    h.engine.threadClosed({ source: 'gh', id: 'pr-9' }, 'merged', '2026-09-23T00:00:01Z')
+    expect(h.repo.tickets.get(ticketId)!.ended).toMatchObject({ outcome: 'merged' })
+    // A person's message resumes the ended ticket, and its worker reports the same merged change again, which binds it.
+    h.tick(1); h.engine.receive(trigger('2', { actor: guest })); h.settle()
+    h.engine.bindThread(ticketId, { source: 'gh', id: 'pr-9' }, true)
+    // The merge cannot un-happen, so the follow stays closed and `followsDone` sees the truth.
+    expect(h.repo.tickets.get(ticketId)!.follows).toEqual([{ thread: 'gh:pr-9', own: true,
+      closed: { at: '2026-09-23T00:00:01.000Z', outcome: 'merged' } }])
+    // The worker's ready report therefore ends the resumed ticket the way the merge did.
+    h.engine.report(ticketId, { state: 'ready', summary: 'Confirmed' })
+    expect(h.repo.tickets.get(ticketId)!.ended).toMatchObject({ outcome: 'merged' })
+  })
   it('gives a follow-up its ended ticket let go to that ticket again when the main Session attaches it there', () => {
     for (const resumed of [false, true]) {
       const h = harness()
@@ -1005,6 +1021,24 @@ describe('automatic input', () => {
     expect(h.executor.start).not.toHaveBeenCalled()
     h.tick(1); h.engine.receive(trigger('2', { actor: guest }))
     expect(h.executor.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: ticketId }), expect.objectContaining({ state: 'pending' }))
+  })
+  it('lets a Policy change leave a launch that never ran pending, and delivers the change to it once it launches', () => {
+    const h = harness()
+    h.engine.receive(trigger('1')); h.pump()
+    const ticketId = h.decide(h.requests.at(-1)!, { kind: 'accept', title: 'Fix', scope: 'small', reason: 'requested' }).ticketId!
+    // The assignment never launched: its launch was held, or an older version kept it outside the effect queue.
+    h.settle({ launch: false })
+    vi.mocked(h.executor.start).mockClear()
+    // A Policy change the ticket bears reaches it as an Input.
+    h.setVersion('v2')
+    h.engine.policyChanged('v1', 'v2', new Map([[ticketId, { proactive: false }]]))
+    // The Input waits; it does not launch the pending Assignment on its own.
+    expect(h.executor.start).not.toHaveBeenCalled()
+    expect(h.repo.tickets.get(ticketId)!.undelivered).toHaveLength(1)
+    // A person's message on the ticket launches it, and the change rides along as an Input of the same Assignment.
+    h.tick(1); h.engine.receive(trigger('2', { actor: guest })); h.settle()
+    expect(h.executor.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: ticketId }), expect.objectContaining({ state: 'pending' }))
+    expect(h.delivered).toHaveLength(2)
   })
 })
 describe('replies', () => {
@@ -1617,5 +1651,42 @@ describe('ignores from the card', () => {
     // Accepting an inferred candidate still takes an assessment's matched rules.
     h.engine.receive(trigger('5', { actor: guest })); h.engine.reevaluate('5'); h.pump()
     expect(() => h.engine.decide('5', { kind: 'accept', title: 'Fix', scope: 'small', reason: 'chat' })).toThrow(new UserError('notExplicit'))
+  })
+})
+describe('evaluateDue isolation', () => {
+  it('keeps working through the threads it can update when one fails, and reports what failed', () => {
+    const h = harness()
+    h.engine.receive(trigger('1'))
+    h.engine.receive(trigger('2', { threads: [{ source: 'chat', id: 't2' }] }))
+    const save = h.repo.threads.save.bind(h.repo.threads)
+    vi.spyOn(h.repo.threads, 'save').mockImplementation(thread => {
+      if (thread.key === 'chat:t2') throw new Error('the record would not save')
+      return save(thread)
+    })
+    // One unreadable thread must not stop the others, and the pass hears of what failed.
+    expect(() => h.engine.evaluateDue()).toThrow(/went on past 1 work item.*chat:t2.*would not save/s)
+    expect(h.requests).toHaveLength(1)
+    expect(h.requests[0]!.thread.key).toBe('chat:t1')
+    vi.mocked(h.repo.threads.save).mockRestore()
+    // Once the failure is gone, the queued Triggers of the thread that failed start too.
+    h.engine.evaluateDue()
+    expect(h.requests).toHaveLength(2)
+    expect(h.requests[1]!.thread.key).toBe('chat:t2')
+  })
+  it('does not fail on an Eval whose pause times an older version wrote in another form', () => {
+    const h = harness()
+    h.engine.receive(trigger('1')); h.pump()
+    const broken = h.repo.threads.get('chat:t1')!
+    broken.evaluating!.delivered = '2026-09-23T00:00:00Z'
+    broken.evaluating!.pausedAt = 'yesterday'; broken.evaluating!.deadline = 'soon'
+    h.repo.threads.save(broken)
+    h.setPaused(true); h.engine.evaluateDue(); h.setPaused(false); h.engine.evaluateDue()
+    // The unreadable deadline counts as past due: the Eval expires through the ordinary path, and every pass goes on.
+    h.tick(1)
+    expect(() => h.engine.evaluateDue()).not.toThrow()
+    // The pass requeued the Trigger and started its fresh Eval again, as any expired Eval's pass does.
+    const after = h.repo.threads.get('chat:t1')!
+    expect(after.expired).toBe(1)
+    expect(after.evaluating).toMatchObject({ triggerIds: ['1'], startedAt: '2026-09-23T00:00:01.000Z' })
   })
 })

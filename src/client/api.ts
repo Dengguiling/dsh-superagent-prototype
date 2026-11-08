@@ -34,8 +34,14 @@ async function api<T>(messages: ApiMessages, path: string, method: string, body?
   let response: Response
   const json = body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
   try {
-    response = await fetch(`/orchestrator/api/${path}`, { method, ...json, headers: { 'x-orchestrator-request': '1', ...json.headers } })
-  } catch {
+    response = await fetch(`/orchestrator/api/${path}`, { method, ...json, headers: { 'x-orchestrator-request': '1', ...json.headers },
+      // A hung request must not wait forever: 30 s after it started, the fetch aborts and reads as the host being unreachable.
+      signal: AbortSignal.timeout(30_000) })
+  } catch (failure) {
+    // The request never got an answer: the host is unreachable, or the timeout fired. AbortSignal.timeout names its abort
+    // TimeoutError and a cancelled request AbortError; a refused connection rejects as TypeError. All read as offline.
+    const name = failure instanceof Error ? failure.name : ''
+    if (name && !['AbortError', 'TimeoutError', 'TypeError'].includes(name)) throw failure
     throw new ApiError(messages.offline, 0, { unreachable: true })
   }
   const text = await response.text()
@@ -58,6 +64,8 @@ async function api<T>(messages: ApiMessages, path: string, method: string, body?
 }
 
 const HIDDEN_FACTOR = 6
+// Deep equality by JSON text: every view is serialized by the same host, whose key order is stable, so equal data
+// yields equal text. A key the server adds or reorders reads as a change, which only costs one extra render.
 const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b)
 /**
  * Poll an endpoint while mounted, backing off when the document is hidden.
@@ -78,6 +86,8 @@ export function usePoll<T>(load: () => Promise<T>, deps: readonly unknown[], int
       clearTimeout(timer)
       try {
         const value = await loader.current()
+        // Skip the update when the view is unchanged, so a poll does not re-render the page; equality is by JSON text
+        // with the server's stable key order (see `same` above).
         if (active) setState(previous => same(previous.data, value) ? previous.error ? { data: previous.data as T } : previous : { data: value })
       } catch (failure) {
         if (active) setState(previous => ({ ...previous, error: failure instanceof Error ? failure : new Error(String(failure)) }))

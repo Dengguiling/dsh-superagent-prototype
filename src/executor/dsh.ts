@@ -357,7 +357,10 @@ export class DshExecutor implements Executor {
   stop(ticket: Ticket, assignment: Assignment, reason: string): void {
     this.transient.delete(assignment.id); this.transient.delete(`launch:${assignment.id}`)
     const report = assignment.report
-    const busy = !!assignment.deliveredAt && !!report && assignment.deliveredAt >= report.at
+    // An Input delivered strictly after the report is new work the ending cancels the turn of. One recorded in the same
+    // millisecond as the report belongs to the turn that reported: the delivery happened before the tool call, whose
+    // clock both stamps share, so it does not make the worker busy.
+    const busy = !!assignment.deliveredAt && !!report && assignment.deliveredAt > report.at
     const ownTurn = (report?.state === 'ready' || report?.state === 'dropped') && !busy
     const sessionId = workerSessionId(ticket.id)
     this.host.store.afterCommit(() => {
@@ -610,10 +613,11 @@ export class DshExecutor implements Executor {
       return stored && liveTicket(stored) && runningAssignment(stored)?.id === idle.id ? stored : undefined
     }
     // A worker whose last word was its result, a question for a person, or a blocked or failed report handed off to a person;
-    // an Input delivered after its result or question is new work.
+    // an Input delivered after its result or question is new work. A delivery recorded in the same millisecond as the
+    // report belongs to the turn that reported, as the worker stop reads it.
     const handedOff = (stored: Ticket) => {
       const assignment = runningAssignment(stored), report = assignment?.report
-      const since = !!assignment?.deliveredAt && !!report && assignment.deliveredAt >= report.at
+      const since = !!assignment?.deliveredAt && !!report && assignment.deliveredAt > report.at
       return ((report?.state === 'ready' || !!stored.attention) && !since) || waitsForPerson(stored)
     }
     const before = live()

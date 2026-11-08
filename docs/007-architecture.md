@@ -280,7 +280,7 @@ Some generic modules still refer directly to one Source:
 
 - Outbox applies the Feishu chat word limit.
 - `src/app/links.ts` resolves Feishu message links and `repliedTo`. It and Runtime read settings with `feishuSettings`.
-- `src/app/resources.ts` reads the `feishu/`, `redmine/` and `gerrit/` originals.
+- `src/app/resources.ts` reads the `feishu/`, `redmine/` and `gerrit/` originals. A worker's `redmine/` and `gerrit/` resource reads are unscoped by design — nothing limits them to the Ticket's own issue or change — because cross-Ticket context is part of the corporate scenario.
 - Runtime sends `changeEndNotices` for merged or closed Tickets.
 - Executor tools bind a reported change with `readChange` and `claimChange`, using the Gerrit context exposed by Runtime.
 - Sessions and Prompts register built-in skills only for Feishu, Redmine and Gerrit. Migration converts their schema-10 records.
@@ -381,7 +381,7 @@ Some generic modules still refer directly to one Source:
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
-| `src/client/pms.tsx` | The workbench page: the task inbox, its 待处理 and 已归档 lists, and the conversation about the opened task |
+| `src/client/pms.tsx` | The workbench page: the task inbox, its 等你处理 and 已归档 lists, and the conversation about the opened task |
 | `src/client/conversation.tsx` | The conversation of a workbench task: its header and Ticket line, the issue's description and journals with their authors, the local archive and delete actions, and the reply box |
 | `src/client/pipeline-page.tsx` | The pipeline page: its stations, each counting the work it holds, and the system problems below the chart |
 | `src/client/rail.tsx` | The signal rail above every page: the live state, the work that needs a person, the Executor's load and the switch that stops it |

@@ -1,4 +1,10 @@
-/** Ports the core depends on. Sources, policies, assessors, executors, and channels are project-specific. */
+/**
+ * Ports the core depends on. Sources, policies, assessors, executors, and channels are project-specific.
+ *
+ * The Engine calls these ports inside its command transaction: an implementation must only enqueue its external work (the
+ * durable effect rows and receipts the adapters write through the same repositories), never perform it, and never throw.
+ * A transaction that rolls back therefore leaves no queued side effect behind, while a committed one sees its effects run.
+ */
 import type { Assignment, ChannelRef, Decision, DecisionKind, Mandate, MandateBasis, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
   from './model.ts'
 import type { Reason } from './reasons.ts'

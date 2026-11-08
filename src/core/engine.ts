@@ -70,18 +70,23 @@ export class Engine {
    * Requeues overdue Evals up to `REQUEUES` times before recording `unavailable` (undelivered Evals never expire), starts the
    * Evals of Threads whose queued Triggers wait, and resumes ended tickets a person's message reached while processing was
    * paused. While processing is paused, nothing expires: each Eval in progress notes when the pause began, and its deadline
-   * moves forward by the pause's length once processing resumes. Each Eval and each ticket update takes one transaction.
+   * moves forward by the pause's length once processing resumes. Each Eval and each ticket update takes one transaction, and
+   * one work item that fails, such as on a record a newer version no longer reads, leaves the others untouched: the pass that
+   * called this reports the failure the aggregate error names.
    */
   evaluateDue(): void {
     const policy = this.options.policy()
-    for (const thread of this.repo.threads.active()) if (thread.evaluating) this.repo.atomic(() => { this.evals.due(thread, policy) })
-    if (policy.paused) return
-    for (const ticket of this.repo.tickets.active()) {
-      if (!liveTicket(ticket) && ticket.undelivered.length) this.repo.atomic(() => { this.tickets.wake(ticket.id) })
+    const broken: { subject: string; error: unknown }[] = []
+    const step = (subject: string, run: () => void): void => {
+      try { this.repo.atomic(run) } catch (error) { broken.push({ subject, error }) }
     }
-    for (const thread of this.repo.threads.active()) {
-      if (thread.pending.length && !thread.evaluating) this.repo.atomic(() => { this.evals.start(thread.key, policy) })
+    for (const thread of this.repo.threads.active()) if (thread.evaluating) step(`eval ${thread.evaluating.id} of ${thread.key}`, () => { this.evals.due(thread, policy) })
+    if (!policy.paused) {
+      for (const ticket of this.repo.tickets.active()) if (!liveTicket(ticket) && ticket.undelivered.length) step(`ticket ${ticket.id}`, () => { this.tickets.wake(ticket.id) })
+      for (const thread of this.repo.threads.active()) if (thread.pending.length && !thread.evaluating) step(`thread ${thread.key}`, () => { this.evals.start(thread.key, policy) })
     }
+    if (broken.length) throw new Error(`evaluateDue went on past ${broken.length} work item(s) it could not update: ` +
+      broken.map(({ subject, error }) => `${subject}: ${String(error)}`).join('; '))
   }
 
   // The main Session

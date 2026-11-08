@@ -161,16 +161,19 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
       const failed = pollFailure(failures, config?.failuresBeforeError ?? 1, error)
       if (!signal.aborted && failed) ctx.report('gerrit', failed)
     }
-    await pause(Math.max(config?.pollSeconds ?? 30) * 1000, signal)
+    await pause((config?.pollSeconds ?? 30) * 1000, signal)
   }
 }
 export interface Round { changes: number; triggers: number; closed: number; unreadable: number }
 /** Keeps the identifiers of the comments already read, so the list stays bounded on a long-lived change. */
 const SEEN_LIMIT = 200
+/** How many pages one poll round may read, so a pathological server cannot keep it busy for good. */
+const MAX_PAGES = 50
 /**
  * One polling round: the open changes whose commit message names a Redmine issue, wherever they are, their review comments
  * and change messages, and the changes the open tickets follow. Every change fails on its own, so one unreadable change
- * does not stop the round.
+ * does not stop the round. The first round records what it saw instead of receiving it, so switching a receive switch on
+ * does not turn the change's whole history into fresh input.
  */
 export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promise<Round> {
   const config = ctx.config<GerritConfig>(SOURCE)
@@ -182,7 +185,16 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   // The account's project is not a fallback: an account resolved before the setting was emptied still names one, and
   // the company tracks every repository.
   const project = config.project
-  const changes = await listChanges(commands, { ...project ? { project } : {}, status: 'open', limit: config.limit }, tally)
+  // The list is read page by page until the last change of a page stops carrying `_more_changes`, so changes beyond
+  // the first page are not invisible on a busy server.
+  const changes: GerritChange[] = []
+  for (let start = 0; start < MAX_PAGES * config.limit; start += config.limit) {
+    const page = await listChanges(commands, { ...project ? { project } : {}, status: 'open', limit: config.limit, start }, tally)
+    changes.push(...page)
+    if (!page.length || page.at(-1)?._more_changes !== true) break
+  }
+  // The first round notes what the tracked changes already carry and receives none of it (see above).
+  const first = ctx.state.get(KV.gerrit.initialized) !== true
   let triggers = 0
   let closed = 0
   let unreadable = 0
@@ -206,7 +218,7 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
       const freshMessages = (change.messages ?? []).filter(message => !!message.id && !seenMessages.includes(message.id))
       for (const message of freshMessages) {
         const trigger = messageTrigger(change, message, account.user, account.httpUrl, issue)
-        if (!trigger) continue
+        if (!trigger || first) continue
         await ctx.receive(trigger)
         triggers += 1
       }
@@ -217,7 +229,7 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
       const fresh = comments.filter(comment => !seen.includes(comment.id))
       for (const comment of fresh) {
         const trigger = commentTrigger(change, comment, account.user, account.httpUrl, issue)
-        if (!trigger) continue
+        if (!trigger || first) continue
         await ctx.receive(trigger)
         triggers += 1
       }
@@ -249,7 +261,8 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
       ctx.threads.patch(`${SOURCE}:${number}`, { pollError: String(error) })
     }
   }
-  ctx.state.set(KV.gerrit.since, new Date().toISOString())
+  // The first round recorded what it saw; from now on, what arrives fresh is received.
+  if (first) ctx.state.set(KV.gerrit.initialized, true)
   ctx.report('gerrit', { state: 'ready', detail: `${changes.length} changes, ${triggers} triggers${closed ? `, ${closed} closed` : ''}`,
     at: new Date().toISOString() })
   return { changes: changes.length, triggers, closed, unreadable }

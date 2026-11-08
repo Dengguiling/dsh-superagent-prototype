@@ -101,6 +101,22 @@ it('waits for the revision its save made, keeping the value it sent, while an ol
   expect(after([arrived(sent, 3)], older)).toEqual({ phase: 'clean', seen: 3 })
 })
 
+it('lets the operator edit anyway when the restart its save began never brings the revision, and resolves cleanly when it does', () => {
+  const sent = { mode: 'auto', limit: 1 }
+  const waiting = after([edit(sent), { type: 'submit' }, { type: 'saved', revision: 3, restarting: true }])
+  const stalled = after([{ type: 'restartStalled' }], waiting)
+  // The block shows what was sent, with the word that the restart did not finish, and its fields work again.
+  expect(stalled).toMatchObject({ phase: 'clean', sent: { value: sent, revision: 3 }, notice: { kind: 'stalledRestart' } })
+  expect(saveBarText(t, stalled)).toEqual({ status: 'restartStalled' })
+  const editing = after([edit({ mode: 'auto', limit: 2 })], stalled)
+  expect(editing.phase).toBe('editing')
+  expect(editing.notice).toBeUndefined()
+  // The restart finishing late still resolves the wait and drops the hint.
+  expect(after([arrived(sent, 3)], stalled)).toEqual({ phase: 'clean', seen: 3 })
+  // Nothing changes when the timeout lands anywhere but a restarting wait.
+  expect(after([{ type: 'restartStalled' }], after([edit({ mode: 'auto', limit: 1 })]))).toMatchObject({ phase: 'editing' })
+})
+
 it('keeps editing when the browser cannot store the draft, and says so', () => {
   const unstored = after([edit({ mode: 'auto', limit: 1 }), { type: 'refused', notice: { kind: 'unstored', error: 'QuotaExceededError' } }])
   expect(unstored.phase).toBe('editing')

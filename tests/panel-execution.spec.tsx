@@ -56,7 +56,7 @@ it('lists Tickets under Execution by who they wait on, with the Executor state a
   expect(server.requests.some(request => request.path === 'tickets?state=open&limit=20')).toBe(true)
   expect(text()).toContain(zh.executorRunning)
   expect(all('.dt-chip').map(chip => chip.textContent)).toContain('Redmine#7状态已开启')
-  await click(zh.idleLabel)
+  await click(zh['ticketFilter.idle'])
   expect(server.requests.some(request => request.path === 'tickets?state=idle&limit=20')).toBe(true)
   expect(text()).toContain('执行器结束了当前回合')
   await click(zh['ticket.ended'])

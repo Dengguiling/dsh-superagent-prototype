@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The Workbench: the assigned Redmine tasks, their conversation with the superagent, and the local list actions.
-import { expect, it } from 'vitest'
+import { act } from 'react'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
 import { usePanel, mount, settle, all, click, tab, text, type } from './fixtures/panel.tsx'
 import { server } from './fixtures/panel-server.ts'
@@ -158,4 +159,17 @@ it('words the inbox in English when the panel speaks English', async () => {
   expect(all('.dt-chat-author').slice(0, 3).map(item => item.textContent)).toEqual(['Team Leader', en.pmsAgent, en.pmsYou])
   expect(composer()?.getAttribute('placeholder')).toBe(en.pmsReplyPlaceholder)
   expect(tab(en['tab.group.inbox']).getAttribute('aria-selected')).toBe('true')
+})
+
+it('returns to the list when the opened task is deleted elsewhere, instead of keeping an error', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  onTestFinished(() => { vi.useRealTimers() })
+  await openTab()
+  await openTask('SDK pagination skips the first page')
+  expect(document.querySelector('.dt-taskview-subject')?.textContent).toBe('SDK pagination skips the first page')
+  // The conversation's poll then finds no such task: the host confirms it is gone (not merely unreachable).
+  delete server.pmsTasks[12]
+  await act(async () => { await vi.advanceTimersByTimeAsync(4500) }); await settle()
+  expect(document.querySelector('.dt-taskview')).toBeNull()
+  expect(text()).toContain(zh.pmsIntro)
 })

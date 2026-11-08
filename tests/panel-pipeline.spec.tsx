@@ -8,18 +8,23 @@ import { server, droppedReply, threadSummary, ticketSummary } from './fixtures/p
 usePanel()
 it('shows the pipeline of the work on its own page, every station counting the work it holds', async () => {
   await mount()
-  // Three destinations; the 待办 group holds one page, so it carries no second row of tabs.
+  // Three destinations; each group holds one page, so there is no second row of tabs anywhere.
   expect(all('.dt-grouptabs [role="tab"]').map(tab => tab.textContent)).toEqual(['任务工作台', '流水线', '设置'])
-  expect(all('.dt-pagetabs [role="tab"]')).toHaveLength(0)
+  expect(document.querySelector('.dt-pagetabs')).toBeNull()
   // The rail stands above every page: the live state, the work that needs a person, the load and the switch that stops it.
   expect(document.querySelector('.dt-rail')?.getAttribute('data-state')).toBe('attention')
   expect(document.querySelector('.dt-rail-state')?.textContent).toBe(zh.pmsAttention)
   expect(document.querySelector('.dt-rail-waiting')?.textContent).toBe(`1${zh.railWaiting}`)
   expect(all('.dt-rail-metric').map(item => item.textContent)).toEqual([`0${zh.queuedLabel}`, `2/3${zh.railWorkerSlots}`])
+  const readsWhenOpening = server.requests.filter(request => request.path === 'pms' && request.method === 'GET').length
   await click(tab(zh['tab.group.pipeline']))
   // The flow group has one page too: the chart is the map, and the section it points at appears below it.
-  expect(all('.dt-pagetabs [role="tab"]')).toHaveLength(0)
+  expect(document.querySelector('.dt-pagetabs')).toBeNull()
   expect(document.querySelector('.dt-status-title')?.textContent).toBe(zh['tab.source'])
+  // The panel reads the task inbox once for the whole panel (see the provider): opening the flow page reads it again
+  // no more than the poll already does, so the chart and the rail draw from one source.
+  const readInbox = () => server.requests.filter(request => request.path === 'pms' && request.method === 'GET').length
+  expect(readInbox()).toBe(readsWhenOpening)
   // Every stage of the flow, with what it counts and the window it covers.
   expect(all('.dt-station-label').map(item => item.textContent)).toEqual(['来源', '触发', '评估中', '工单', '执行中', '等人', '完成'])
   expect(all('.dt-station-count').map(item => item.textContent)).toEqual(['2', '2', '1', '3', '1', '1', '2'])
@@ -150,7 +155,7 @@ it('shows the pipeline in English', async () => {
   expect(all('.dt-grouptabs [role="tab"]').map(tab => tab.textContent)).toEqual(['Task workbench', 'Pipeline', 'Settings'])
   expect(document.querySelector('.dt-rail-state')?.textContent).toBe(en.pmsAttention)
   await click(tab(en['tab.group.pipeline']))
-  expect(all('.dt-pagetabs [role="tab"]')).toHaveLength(0)
+  expect(document.querySelector('.dt-pagetabs')).toBeNull()
   expect(document.querySelector('.dt-status-title')?.textContent).toBe(en['tab.source'])
   expect(all('.dt-station-label').map(item => item.textContent)).toEqual(['Sources', 'Triggers', 'Evaluating', 'Tickets', 'Working', 'Waiting', 'Done'])
   // The system problems are listed below the chart, each with the way to it.

@@ -14,10 +14,11 @@ const sameChannel = (a: ChannelRef, b: ChannelRef): boolean => JSON.stringify(a)
 export const automatic = (input: TicketInput | undefined): boolean => input?.kind === 'note' || (input?.kind === 'trigger' && !input.human)
 /**
  * Whether a ticket's worker read a Trigger Input before `until`, its latest report or turn end: its Session took the message
- * into a step before then. One delivered before reads were recorded counts as read once it reached the worker by then.
+ * into a step before then. One delivered before reads were recorded counts as read once it reached the worker by then. A read
+ * recorded at the same instant as `until`, a step that claimed and reported within one millisecond, counts as read too.
  */
 const readBefore = (input: Extract<TicketInput, { kind: 'trigger' }>, until: string): boolean => input.readAt === undefined
-  ? (input.deliveredAt && input.deliveredAt > input.at ? input.deliveredAt : input.at) <= until : !!input.readAt && input.readAt < until
+  ? (input.deliveredAt && input.deliveredAt > input.at ? input.deliveredAt : input.at) <= until : !!input.readAt && input.readAt <= until
 const STATUS_REQUEST = 'Report the current ticket status with orchestrator_report. This is a status-only request: do not resume implementation or perform external actions.'
 
 /**
@@ -64,8 +65,10 @@ export class Tickets extends EnginePart {
     const ticket = this.require(ticketId)
     const followed = threadKey(thread)
     const follow = ticket.follows?.find(item => item.thread === followed)
-    // Re-binding a thread reopens it if previously closed; `own` remains true once set.
-    if (follow) { follow.own ||= own; delete follow.closed } else ticket.follows = [...ticket.follows ?? [], { thread: followed, own }]
+    // Re-binding a thread reopens it if previously closed; `own` remains true once set. A thread that ended merged stays
+    // closed: a merged change cannot reopen, and reopening it would hold the ticket open for a close that already happened.
+    if (follow) { follow.own ||= own; if (follow.closed?.outcome !== 'merged') delete follow.closed }
+    else ticket.follows = [...ticket.follows ?? [], { thread: followed, own }]
     ticket.updatedAt = this.now()
     this.repo.tickets.save(ticket)
     return ticket
@@ -190,7 +193,7 @@ export class Tickets extends EnginePart {
     this.dropSubscriptions(thread, 'executor', ticketId, reason)
     // Its worker found the Thread is not its ticket's: it hands back, with its reason, the person's messages there it decides.
     for (const trigger of this.triggersOf(ticket)) {
-      if (trigger.threads.some(ref => threadKey(ref) === thread) && this.owners(trigger).includes(ticketId)) this.handBack(ticketId, trigger, reason)
+      if (trigger.threads.some(ref => threadKey(ref) === thread) && this.owners(trigger).includes(ticketId)) this.recordHandback(ticketId, trigger, reason)
     }
   }
   /**
@@ -229,7 +232,8 @@ export class Tickets extends EnginePart {
   }
   /**
    * Add an Input once (idempotently) and ask the Executor to deliver it, or to launch again a pending Assignment whose launch
-   * failed once no person is waited for: a Policy change alone does not launch it again.
+   * failed once no person is waited for: a Policy change alone does not launch it again. Its delivery still goes out to a
+   * pending Assignment once it launches, so the worker learns of the change with its assignment.
    */
   addInput(ticket: Ticket, input: TicketInput): void {
     if (ticket.inputs.some(existing => existing.id === input.id)) return
@@ -241,7 +245,9 @@ export class Tickets extends EnginePart {
     if (!liveTicket(ticket) || held) return
     const running = runningAssignment(ticket), latest = latestAssignment(ticket)
     if (running) this.options.executor.deliver(ticket, running)
-    else if (latest?.state === 'pending' && !waitsForPerson(ticket)) this.options.executor.start(ticket, latest)
+    else if (input.kind !== 'policy-changed' && latest?.state === 'pending' && !waitsForPerson(ticket)) {
+      this.options.executor.start(ticket, latest)
+    }
   }
   /**
    * Resume an ended ticket under its unchanged Mandate when a person's message on one of its Threads waits for it: no Eval

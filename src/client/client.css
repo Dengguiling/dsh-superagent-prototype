@@ -231,7 +231,7 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
 .dt-values dt { color: var(--dsw-alias-label-tertiary); }
 .dt-values dd { margin: 0; }
 .dt-pre { margin: 0; padding: 12px; border-radius: 8px; background: var(--dsw-alias-bg-module-platform); font-family: var(--ds-font-family-code, Menlo, monospace); font-size: var(--dsw-font-xxs-12-font-size); line-height: var(--dsw-font-xxs-12-line-height); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }
-.dt-pre ins { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, green) 18%, transparent); text-decoration: none; }
+.dt-pre ins { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 18%, transparent); text-decoration: none; }
 .dt-pre del { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent); text-decoration: none; }
 .dt-prompt { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
 .dt-prompt-nav { display: flex; flex-direction: column; gap: 2px; }
@@ -255,6 +255,8 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
   .dt-filters .dt-search { margin-left: 0; }
 }
 /* Local UI primitive styles (see controls.tsx). */
+/* Visually hidden text that a screen reader still reads, for a mark that carries no aria-label of its own. */
+.dt-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: none; border-radius: 8px; cursor: pointer; font: inherit; font-size: var(--dsw-font-s-14-font-size); line-height: var(--dsw-font-s-14-line-height); color: var(--dsw-alias-label-primary); background: transparent; padding: 0 14px; white-space: nowrap; }
 .dt-btn:disabled { cursor: not-allowed; opacity: 0.4; }
 .dt-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
@@ -278,19 +280,13 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
 .dt-pill:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dt-pill-active, .dt-pill-active:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border); }
 .dt-tabs { display: grid; padding: 4px; border-radius: 8px; background: var(--dsw-alias-bg-module-platform); }
-/* The pages of the current group sit below the three destinations, in the same quiet underline style as the tabs inside a page. */
-.dt-pagetabs { display: flex; gap: 16px; flex-wrap: wrap; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
-.dt-pagetabs .dt-tab { height: auto; padding: 0 0 6px; border-width: 0; border-radius: 0; background: none; font-size: var(--dsw-font-xs-13-font-size); line-height: var(--dsw-font-xs-13-line-height); color: var(--dsw-alias-label-tertiary); }
-.dt-pagetabs .dt-tab:hover { color: var(--dsw-alias-label-primary); }
-.dt-pagetabs .dt-tab[aria-selected='true'] { color: var(--dsw-alias-label-primary); font-weight: 500; background: none; border-color: transparent; box-shadow: inset 0 -1.5px 0 var(--dsw-alias-label-primary); }
-.dt-pagetabs .dt-tab:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 4px; }
 .dt-tab { box-sizing: border-box; height: 34px; padding: 0 12px; border: 0.5px solid transparent; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: var(--dsw-font-s-14-font-size); line-height: var(--dsw-font-s-14-line-height); white-space: nowrap; cursor: pointer; transition: color 180ms ease, background 180ms ease; }
 .dt-tab:hover { color: var(--dsw-alias-label-primary); }
 .dt-tab[aria-selected='true'] { color: var(--dsw-alias-label-primary); font-weight: 600; background: var(--dsw-alias-bg-layer-3); border-color: var(--dsw-alias-border-l3); }
 .dt-tab:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 4px; }
 .dt-segment { height: 28px; padding: 0 16px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: var(--dsw-font-xs-13-font-size); line-height: var(--dsw-font-xs-13-line-height); font-weight: 500; white-space: nowrap; cursor: pointer; transition: color 120ms ease, background 160ms ease; }
-.dt-segment:hover:not(:disabled), .dt-segment[aria-selected='true'] { color: var(--dsw-alias-label-primary); }
-.dt-segment[aria-selected='true'] { background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-soft); }
+.dt-segment:hover:not(:disabled), .dt-segment[aria-checked='true'] { color: var(--dsw-alias-label-primary); }
+.dt-segment[aria-checked='true'] { background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-soft); }
 .dt-segment:disabled { cursor: default; opacity: 0.4; }
 .dt-segment:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
 .dt-input { box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 32px; min-width: 0; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }
@@ -456,7 +452,6 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-info-warn { color: var(--dsw-alias-state-warn-primary); }
 .dt-field-segmented { max-width: 240px; }
 /* Workbench: the task inbox on the left and the task's conversation on the right. */
-/* The workbench: the task inbox on the left and the task's conversation on the right. */
 .dt-inbox { display: grid; grid-template-columns: minmax(340px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; min-height: 420px; }
 /* The task inbox fills the page: the list and the conversation each scroll in their own box, and the head of the
    conversation — with the link into the task system — stays where it is. */

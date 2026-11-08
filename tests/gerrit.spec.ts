@@ -51,6 +51,8 @@ const comment = (id: string, fields: Record<string, unknown> = {}) => ({
 
 function host(overrides: Partial<SourceContextDeps> = {}, gerritConfig: Record<string, unknown> = {}) {
   const store = new Store(join(directory, 'db.sqlite'))
+  // The polling tests below describe ordinary rounds; the first-round behavior has its own test.
+  store.set(KV.gerrit.initialized, true)
   store.saveSettings(SettingsSchema.parse({
     policy: { sources: { gerrit: { allowed: [{ id: 'bob', name: 'Bob' }] } } }, eval: { mode: 'auto' },
     sources: { gerrit: { enabled: true, config: { httpUrl: HTTP, project: 'demo', user: AGENT, password: 'secret', ...gerritConfig } } },
@@ -289,6 +291,55 @@ describe('a Gerrit polling round', () => {
     expect(h.receive.mock.calls[0]![0].id).toBe(key('gerrit-message', 'demo~master~I1234', 'm1'))
     expect(h.receive.mock.calls[0]![0].actor).toEqual({ source: SOURCE, id: 'bob' })
     expect(h.receive.mock.calls[0]![0].meta).toMatchObject({ kind: 'message', issueId: 7 })
+    h.store.close()
+  })
+  it('records what it saw on its first round, and receives only what arrives after it', async () => {
+    const h = host()
+    h.store.delete(KV.gerrit.initialized)
+    const review = { id: 'm1', message: 'Patch Set 1: an old note.', author: { username: 'bob', name: 'Bob' }, date: '2026-09-02T10:00:00Z' }
+    gerrit({ '/changes/': [change()], '/changes/42/detail': change({ messages: [review] }), '/changes/42/comments': [comment('Ic1')] })
+    const first = await pollRound(h, new AbortController().signal)
+    // The first round receives nothing: the history of the tracked changes is not fresh input.
+    expect(first.triggers).toBe(0)
+    expect(h.receive).not.toHaveBeenCalled()
+    expect(h.store.get(KV.gerrit.comment('42'))).toEqual(['Ic1'])
+    expect(h.store.get(KV.gerrit.message('42'))).toEqual(['m1'])
+    expect(h.store.get(KV.gerrit.initialized)).toBe(true)
+    // A comment that arrives after the first round is received.
+    gerrit({ '/changes/': [change()], '/changes/42/detail': change({ messages: [review] }),
+      '/changes/42/comments': [comment('Ic1'), comment('Ic2')] })
+    const second = await pollRound(h, new AbortController().signal)
+    expect(second.triggers).toBe(1)
+    expect(h.receive.mock.calls[0]![0].id).toBe(key('gerrit-comment', 'demo~master~I1234', 'Ic2'))
+    h.store.close()
+  })
+  it('lists past one page while the last change of a page carries _more_changes', async () => {
+    const h = host({}, { limit: 3 })
+    const numbered = (number: number) => change({ _number: number, id: `demo~master~I${number}`,
+      revisions: { [`abc${number}`]: { commit: { message: 'Fix it\n\nIssue: 7\n' } } } })
+    vi.spyOn(Commands.prototype, 'http').mockImplementation(async url => {
+      calls.push({ url, method: 'GET' })
+      const path = url.replace(`${HTTP}/a`, '').split('?')[0]!
+      if (path === '/changes/') {
+        const query = new URL(url).searchParams
+        const start = Number(query.get('start') ?? 0), n = Number(query.get('n') ?? 100)
+        const numbers = [40, 41, 42, 43, 44], slice = numbers.slice(start, start + n)
+        const body = slice.map(numbered)
+        if (start + n < numbers.length) (body.at(-1)! as { _more_changes?: boolean })._more_changes = true
+        return { status: 200, body: `)]}'\n${JSON.stringify(body)}` }
+      }
+      const detail = /^\/changes\/(\d+)\/detail$/.exec(path)
+      if (detail) return { status: 200, body: `)]}'\n${JSON.stringify(numbered(Number(detail[1])))}` }
+      if (/^\/changes\/\d+\/comments$/.test(path)) return { status: 200, body: `)]}'\n[]` }
+      return { status: 404, body: ")]}'\n{}" }
+    })
+    const round = await pollRound(h, new AbortController().signal)
+    expect(round.changes).toBe(5)
+    // Two list requests: the second continued the query with `start`, which is how Gerrit pages it.
+    const lists = calls.filter(call => call.url.includes('/a/changes/?'))
+    expect(lists).toHaveLength(2)
+    expect(lists[0]!.url).toContain('start=0')
+    expect(lists[1]!.url).toContain('start=3')
     h.store.close()
   })
 })

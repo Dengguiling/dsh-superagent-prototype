@@ -77,6 +77,14 @@ it('reports Feishu failures with their code and without command arguments', () =
   expect(membership).toMatchObject({ message: 'operator is not in the chat (232011)', code: 232011 })
   expect(commandError({stderr:JSON.stringify({error:{code:999,message:'scope missing'}})}).message).toBe('scope missing (999)')
 })
+it('reports a Feishu CLI that answered no JSON as a CliError, without the output or the arguments', async () => {
+  const commands = new Commands(() => deployment, {}, new AbortController().signal)
+  const run = vi.spyOn(commands, 'run').mockResolvedValue('<html>gateway timeout</html>')
+  const failed = commands.lark(['im', '+chat-members-list'], 'a directory whose name is private')
+  await expect(failed).rejects.toBeInstanceOf(CliError)
+  await expect(failed).rejects.toMatchObject({ message: 'The Feishu CLI did not answer JSON' })
+  expect(run.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--format', 'json']))
+})
 describe('Channels', () => {
   const commands = () => new Commands(() => deployment, {}, new AbortController().signal)
   const feishu = { ...reply, channel: feishuChannel('oc_1', 'om_1') }
