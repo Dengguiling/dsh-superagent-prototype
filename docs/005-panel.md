@@ -17,7 +17,7 @@ The panel opens on **Overview**, with **Workbench**, **Source**, **Trigger**, **
 | Tab | Shows |
 | --- | --- |
 | Overview | The live pipeline dashboard: the system's state, the workers running and every station's count and flow. Below it, Tickets needing action and system problems |
-| Workbench | The task inbox of the operator: the task system's issues assigned to the bound account, filtered as 待处理 or 已归档, with the Ticket the agent holds and the conversation about the issue. Archive and delete manage this list, never the task system |
+| Workbench | The task inbox of the operator: the task system's issues assigned to the bound account, filtered as 待处理, 未处理 or 已归档, with the state of each task, the Ticket the agent holds and the conversation about the issue. Archive and delete manage this list, never the task system |
 | Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Overview |
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |
 | Eval | Decisions with their reason and matched rules |
@@ -34,7 +34,9 @@ Below the dashboard comes what needs a person: Tickets needing action and system
 
 ### The workbench
 
-The workbench is the operator's task inbox. It lists the task system's issues assigned to the bound account — the work the agent takes — as **待处理** and **已归档**, each row showing its id, its project and its status; a row the agent holds a Ticket for is marked with the Ticket. **归档** moves a task out of 待处理, **删除** hides it from both lists, and both change only what the workbench shows: the task system is untouched, and a Ticket that works on the task continues.
+The workbench is the operator's task inbox. It lists the task system's issues assigned to the bound account — the work the agent takes — as **待处理** (waiting for the judgement, worked on, or waiting for the person), **未处理** (the route judged the task and did not take it, with the reason it gave) and **已归档** (the operator's own list), each row showing its id, its project, its status and the state the task stands in. A row the agent holds a Ticket for is marked with the Ticket. **归档** moves a task out of 待处理, **删除** hides it from every list, and both change only what the workbench shows: the task system is untouched, and a Ticket that works on the task continues.
+
+The state of a task comes from what the agent did with it: a task nobody judged yet is **待分析**, a task the route declined is **未处理**, a task with an open Ticket is **分析中** or **等你处理** (the Ticket waits for a person), and a finished Ticket is **已完成**. The state is read from the Ticket the agent holds and from the last decision of the issue's thread, so it says why a task was not taken.
 
 Selecting a task opens the conversation about it: the issue's description and journals, with their authors and times, the agent's replies on one side and the operator's own on the other, each linking to its place in the issue. The head shows the task's project, status and assignee and links to the task system; a Ticket the agent holds shows its stage, its change and a button that opens the agent's Session. The composer sends a reply as a note on the issue, and the Source delivers it to the agent at once, so the work continues without waiting for the next poll; when that hand-off fails, the note stays a note and the Source delivers it on the next poll, so an instruction is never lost. Because the agent and the operator may share one account, the Source tells its own notes and the panel's notes from a person's by the markers they carry: on a shared account the operator's unmarked notes are human input.
 

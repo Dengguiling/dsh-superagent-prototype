@@ -14,6 +14,12 @@ import { actorOf, agentNote, panelNote, panelNoteText, redmineChannel, redmineJo
   type RedmineIssue } from '../../sources/redmine-trigger.ts'
 import type { Store } from '../store.ts'
 
+/**
+ * Where a task stands in the agent's work: not judged yet, declined by the route, worked on, waiting for the person, or
+ * finished.  The workbench shows the state of every task, so an operator sees why a task was not taken.
+ */
+export type PmsState = 'undecided' | 'declined' | 'working' | 'waiting' | 'ended'
+
 /** One task of the inbox, with the project that names its repository and the ticket the agent holds for it. */
 export interface PmsTask {
   id: number
@@ -28,6 +34,10 @@ export interface PmsTask {
   url: string
   /** Set when the operator archived the task from the workbench. */
   archivedAt?: string
+  /** Where the task stands in the agent's work. */
+  state: PmsState
+  /** Why the route declined the task, by reason code; set when the state is `declined`. */
+  reason?: string
   /** The ticket the agent holds for the task, with its stage, its change and its worker Session. */
   ticket?: { id: string; title: string; stage: string; change?: number; session?: string }
 }
@@ -67,8 +77,10 @@ export interface PmsPipeline {
 
 /** The operator's task inbox: the tasks to do, the ones they archived, the pipeline, and the connection to the task system. */
 export interface PmsView {
-  /** The tasks assigned to the bound account and not archived. */
+  /** The tasks assigned to the bound account and not archived: the ones the agent works on and the ones it has not judged. */
   tasks: PmsTask[]
+  /** The tasks the route declined; the reason is on the task. */
+  declined: PmsTask[]
   /** The tasks the operator archived; the task system is untouched. */
   archived: PmsTask[]
   pipeline: PmsPipeline
@@ -148,15 +160,27 @@ function heldTickets(store: Store): Map<number, TicketView> {
   return held
 }
 
+/** The reason the route declined a task, by code: the decision of the last eval of the issue's thread. */
+function declineOf(store: Store, issue: number): string | undefined {
+  const decision = store.decisions.byThread(`redmine:${issue}`).at(-1)
+  if (decision?.kind !== 'ignore') return undefined
+  return decision.reason[0]?.code
+}
+
 /** Projects one issue into an inbox task, with the operator's local list state and the ticket held for it. */
 function taskOf(issue: RedmineIssue, account: RedmineAccount, held: Map<number, TicketView>, flags: TaskFlags | undefined,
-  project: string): PmsTask {
+  project: string, decline: string | undefined): PmsTask {
   const ticket = held.get(issue.id)
+  const stage = ticket?.stage
+  const state: PmsState = stage === 'person' ? 'waiting' : stage === 'ended' ? 'ended'
+    : stage ? 'working' : decline ? 'declined' : 'undecided'
   return {
     id: issue.id, subject: issue.subject, status: issue.status?.name ?? '', priority: issue.priority?.name ?? '',
     assignee: issue.assigned_to?.name ?? '', author: issue.author?.name ?? '',
     project,
     updated: issue.updated_on ?? '', url: redminePage(account.baseUrl, issue.id),
+    state,
+    ...decline && state === 'declined' ? { reason: decline } : {},
     ...flags?.archivedAt ? { archivedAt: flags.archivedAt } : {},
     ...ticket ? { ticket } : {},
   }
@@ -171,14 +195,19 @@ export async function pms(store: Store, commands: Commands, deployment: Deployme
   const inbox = await readInbox(commands, deployment)
   const held = heldTickets(store)
   const tasks: PmsTask[] = []
+  const declined: PmsTask[] = []
   const archived: PmsTask[] = []
   for (const issue of inbox.issues) {
     const flags = store.get(KV.pms.task(issue.id))
     if (flags?.deletedAt) continue
-    const task = taskOf(issue, inbox.account!, held, flags, await projectOf(commands, issue))
+    const task = taskOf(issue, inbox.account!, held, flags, await projectOf(commands, issue), declineOf(store, issue.id))
     if (task.archivedAt) archived.push(task)
     // A closed issue is finished: it stays in the list only when the operator archived it.
-    else if (!inbox.closed.has(issue.status?.id ?? 0)) tasks.push(task)
+    else if (!inbox.closed.has(issue.status?.id ?? 0)) {
+      // A task the route declined is not work in progress; it has its own list.
+      if (task.state === 'declined') declined.push(task)
+      else tasks.push(task)
+    }
   }
   const settings = store.settings()
   // The work in the pipeline now, by the stage each open ticket is in, and what passed through in the last 24 hours.
@@ -189,6 +218,7 @@ export async function pms(store: Store, commands: Commands, deployment: Deployme
   const ended = store.tickets.list().filter(ticket => ticket.ended && Date.parse(ticket.ended.at ?? '') >= Date.now() - day)
   return {
     tasks,
+    declined,
     archived,
     pipeline: {
       tasks: tasks.length,
@@ -241,7 +271,8 @@ export async function pmsTask(store: Store, commands: Commands, deployment: Depl
   }
   if (item.assigned_to?.id !== account.id) return undefined
   return {
-    task: taskOf(item, account, heldTickets(store), store.get(KV.pms.task(item.id)), await projectOf(commands, item)),
+    task: taskOf(item, account, heldTickets(store), store.get(KV.pms.task(item.id)), await projectOf(commands, item),
+      declineOf(store, item.id)),
     messages: messagesOf(item, account),
     canReply: true,
     source: sourceOf(account, true),

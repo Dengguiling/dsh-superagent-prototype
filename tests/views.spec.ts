@@ -377,6 +377,21 @@ function inboxWork(): void {
     meta: {} })
 }
 
+it('files the tasks the route did not take under their own filter, with the reason it gave', async () => {
+  inboxWork()
+  const { deployment, commands } = inboxCommands([inboxIssue(7), inboxIssue(8)])
+  // Before the judgement the task waits for it: it is neither declined nor worked on.
+  expect((await pms(store, commands, deployment, 0)).tasks.map(task => [task.id, task.state])).toEqual([[7, 'working'], [8, 'undecided']])
+  // The route judged the second task and did not take it: the sender is not on the list of the source.
+  store.decisions.save({ id: 'd1', evalId: 'ev2', threadKey: 'redmine:8', triggerIds: ['e9'], policyVersion: 'v', at,
+    kind: 'ignore', reason: [{ code: 'not_a_member' }], strength: 'inferred' })
+  const view = await pms(store, commands, deployment, 0)
+  // The task the agent works on stays in the inbox, the one it declined has its own list with the reason.
+  expect(view.tasks.map(task => task.id)).toEqual([7])
+  expect(view.tasks[0]).toMatchObject({ id: 7, state: 'working' })
+  expect(view.declined).toMatchObject([{ id: 8, state: 'declined', reason: 'not_a_member' }])
+})
+
 it('builds the task inbox from the issues assigned to the bound account, the operator\'s list state, and the tickets held for them', async () => {
   inboxWork()
   // The task system lists four bugs assigned to the account; the operator archived one and hid another for good.

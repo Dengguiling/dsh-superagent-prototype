@@ -4,9 +4,10 @@ import { usePoll, type PmsView, type TaskRow } from './api.ts'
 import { Conversation } from './conversation.tsx'
 import { useAction, usePanel } from './provider.tsx'
 import { PMS_FILTERS, type PmsFilter } from './route.ts'
+import { reasonLabel } from './text.ts'
 import { ConfirmButton, Hint, LoadState, PageHead, When } from './widgets.tsx'
 
-/** One row of the list: the task's name and status, its ticket when the agent holds one, and the actions of the list. */
+/** One row of the list: the task's name and status, where it stands, and the actions of the list. */
 function TaskLine({ task, selected, archived, onOpen, onChanged }: {
   task: TaskRow; selected: boolean; archived: boolean; onOpen: () => void; onChanged: () => Promise<void>
 }) {
@@ -18,6 +19,8 @@ function TaskLine({ task, selected, archived, onOpen, onChanged }: {
     <button type="button" className="dt-task-open" aria-current={selected ? 'true' : undefined} onClick={onOpen}>
       <span className="dt-task-subject">{task.subject}</span>
       <span className="dt-task-meta"><span>#{task.id}</span><span>{task.project}</span><span>{task.status}</span><When at={task.updated} /></span>
+      <span className="dt-task-state" data-state={task.state}>{t(`pmsState.${task.state}`)}</span>
+      {task.reason && <span className="dt-task-reason">{reasonLabel(t, task.reason)}</span>}
       {task.ticket && <span className="dt-task-ticket"><Icon name="review" size={12} />{t('pmsTicket', { title: task.ticket.title })}</span>}
     </button>
     <span className="dt-task-actions">
@@ -33,8 +36,8 @@ function TaskList({ data, filter, selected, onOpen, onChanged }: {
   data: PmsView; filter: PmsFilter; selected: string | undefined; onOpen: (task: TaskRow) => void; onChanged: () => Promise<void>
 }) {
   const { t } = usePanel()
-  const tasks = filter === 'archived' ? data.archived : data.tasks
-  if (!tasks.length) return <Hint>{filter === 'archived' ? t('pmsNoArchived') : t('pmsNoTasks')}</Hint>
+  const tasks = filter === 'archived' ? data.archived : filter === 'declined' ? data.declined : data.tasks
+  if (!tasks.length) return <Hint>{filter === 'archived' ? t('pmsNoArchived') : filter === 'declined' ? t('pmsNoDeclined') : t('pmsNoTasks')}</Hint>
   return <ul className="dt-task-rows">{tasks.map(task => <TaskLine key={task.id} task={task} archived={filter === 'archived'}
     selected={selected === String(task.id)} onOpen={() => onOpen(task)} onChanged={onChanged} />)}</ul>
 }
@@ -44,7 +47,10 @@ export function PmsPage({ id, filter }: { id?: string; filter: PmsFilter }) {
   const { t, call, navigate } = usePanel()
   const { data, error, reload } = usePoll(() => call('GET pms'), [], 5000)
   const list = (next: PmsFilter) => ({ page: 'pms' as const, ...next === 'active' ? {} : { query: { filter: next } } })
-  const counts: Record<PmsFilter, number> = { active: data?.tasks.length ?? 0, archived: data?.archived.length ?? 0 }
+  const counts: Record<PmsFilter, number> = { active: data?.tasks.length ?? 0, declined: data?.declined.length ?? 0,
+    archived: data?.archived.length ?? 0 }
+  const filterLabel = (value: PmsFilter) => value === 'archived' ? t('pmsFilterArchived')
+    : value === 'declined' ? t('pmsFilterDeclined') : t('pmsFilterActive')
   return <>
     <PageHead title={t('pmsTitle')}>{t('pmsIntro')}</PageHead>
     <LoadState error={error} loading={!data} />
@@ -54,7 +60,7 @@ export function PmsPage({ id, filter }: { id?: string; filter: PmsFilter }) {
         <aside className="dt-inbox-list">
           <div className="dt-inbox-filters" role="group" aria-label={t('pmsFilters')}>
             {PMS_FILTERS.map(value => <Pill key={value} active={filter === value} onClick={() => navigate(list(value), true)}>
-              {value === 'archived' ? t('pmsFilterArchived') : t('pmsFilterActive')}<span className="dt-count">{counts[value]}</span></Pill>)}
+              {filterLabel(value)}<span className="dt-count">{counts[value]}</span></Pill>)}
           </div>
           <TaskList data={data} filter={filter} selected={id} onChanged={reload}
             onOpen={task => navigate({ page: 'pms', id: String(task.id), ...filter === 'active' ? {} : { query: { filter } } })} />

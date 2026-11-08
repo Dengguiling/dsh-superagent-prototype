@@ -213,20 +213,25 @@ const pmsTask = (fields: ApiResponse<'GET pms'>['tasks'][number]): ApiResponse<'
 /** The operator's assigned tasks of the default inbox: one the agent holds, one still open in the task system. */
 const PMS_TASKS = [
   pmsTask({ id: 12, subject: 'SDK pagination skips the first page', status: 'New', priority: 'Normal', assignee: 'Software Developer', author: 'Team Leader',
-    project: 'sdk', updated: '2026-11-05T09:00:00Z', url: 'http://redmine.test/issues/12',
+    project: 'sdk', updated: '2026-11-05T09:00:00Z', url: 'http://redmine.test/issues/12', state: 'working',
     ticket: { id: 'ticket-1', title: 'Fix SDK pagination', stage: 'working', change: 1003, session: 'worker-ticket-1' } }),
   pmsTask({ id: 13, subject: 'CLI --timeout is ignored', status: 'In Progress', priority: 'High', assignee: 'Software Developer', author: 'Team Leader',
-    project: 'sdk-cli', updated: '2026-11-05T10:00:00Z', url: 'http://redmine.test/issues/13' }),
+    project: 'sdk-cli', updated: '2026-11-05T10:00:00Z', url: 'http://redmine.test/issues/13', state: 'undecided' }),
 ]
+/** A task the route did not take: it stays in the inbox, in the declined filter only. */
+const PMS_DECLINED = [pmsTask({ id: 14, subject: 'Document the migration guide', status: 'New', priority: 'Low', assignee: 'Software Developer',
+  author: 'Someone Else', project: 'sdk', updated: '2026-11-05T11:00:00Z', url: 'http://redmine.test/issues/14', state: 'declined',
+  reason: 'not_a_member' })]
 /** A task the operator archived: it stays in the inbox, in the archived filter only. */
 const PMS_ARCHIVED = [pmsTask({ id: 9, subject: 'Old demo issue', status: 'New', priority: 'Low', assignee: 'Software Developer', author: 'Team Leader',
-  project: 'demo', updated: '2026-11-03T09:00:00Z', url: 'http://redmine.test/issues/9', archivedAt: '2026-11-04T00:00:00Z' })]
+  project: 'demo', updated: '2026-11-03T09:00:00Z', url: 'http://redmine.test/issues/9', state: 'ended', archivedAt: '2026-11-04T00:00:00Z' })]
 const PMS_SOURCE = (): ApiResponse<'GET pms'>['source'] => ({ name: 'demo', url: 'http://redmine.test', configured: true,
   // Nothing runs while the deployment check waits, so the task system does not answer yet.
   connected: !(server as PanelServer | undefined)?.setup.problem })
 /** The default Workbench view: the operator's tasks, one archived, and work in every pipeline station but idle. */
 const pmsView = (): ApiResponse<'GET pms'> => ({
   tasks: PMS_TASKS.map(task => ({ ...task })),
+  declined: PMS_DECLINED.map(task => ({ ...task })),
   archived: PMS_ARCHIVED.map(task => ({ ...task })),
   pipeline: { tasks: 2, taken: 1, arrived: 5, evaluating: 1, tickets: 3, queued: 1, waiting: 1, idle: 0, ended: 2 },
   executor: { running: 1, max: 4, paused: false },

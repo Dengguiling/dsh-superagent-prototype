@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Button, Icon } from './controls.tsx'
 import { usePoll, type TaskDetailView, type TaskMessage } from './api.ts'
 import { useAction, usePanel } from './provider.tsx'
-import { errorText, type T } from './text.ts'
+import { errorText, reasonLabel, type T } from './text.ts'
 import { ConfirmButton, Hint, LoadState, When } from './widgets.tsx'
 
 /** The author label of one message: the superagent, the operator, or whoever else wrote on the issue. */
@@ -74,6 +74,8 @@ export function Conversation({ id, onBack, onChanged }: { id: string; onBack: ()
         </div>
       </header>
       {ticket && <TicketLine task={ticket} session={ticket.session ?? ticket.id} open={() => { void openSession(ticket.session ?? ticket.id) }} />}
+      <p className="dt-taskview-state" data-state={data.task.state}>{t(`pmsState.${data.task.state}`)}</p>
+      {data.task.reason && <p className="dt-hint">{t('pmsDeclinedReason', { reason: reasonLabel(t, data.task.reason) })}</p>}
       {data.task.archivedAt && <p className="dt-hint">{t('pmsArchivedHint')}</p>}
       <div className="dt-chat">
         <h3 className="dt-chat-heading">{t('pmsConversation')}</h3>

@@ -8,7 +8,7 @@ export const TABS = ['overview', 'pms', 'source', 'trigger', 'eval', 'execution'
 export type Tab = typeof TABS[number]
 export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'prompts', 'deployment'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
-export const PMS_FILTERS = ['active', 'archived'] as const
+export const PMS_FILTERS = ['active', 'declined', 'archived'] as const
 export type PmsFilter = typeof PMS_FILTERS[number]
 export type Route = { page: 'overview' | 'source'; id?: undefined; query?: undefined }
   | { page: 'pms'; id?: string; query?: { filter?: PmsFilter } }

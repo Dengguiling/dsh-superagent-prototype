@@ -20,7 +20,7 @@ it('lists the tasks assigned to the bound account with their tickets, and keeps 
   await openTab()
   // The tab order starts with Overview; the Workbench lists the inbox.
   expect(all('[role="tab"]').map(item => item.textContent)).toEqual(['概览', '工作台', '来源', '触发', '评估', '执行', '设置'])
-  expect(all('.dt-inbox-filters .dt-pill').map(item => item.textContent)).toEqual([`${zh.pmsFilterActive}2`, `${zh.pmsFilterArchived}1`])
+  expect(all('.dt-inbox-filters .dt-pill').map(item => item.textContent)).toEqual([`${zh.pmsFilterActive}2`, `${zh.pmsFilterDeclined}1`, `${zh.pmsFilterArchived}1`])
   expect(all('.dt-task-open').map(item => item.textContent)).toEqual([
     expect.stringContaining('SDK pagination skips the first page'), expect.stringContaining('CLI --timeout is ignored')])
   expect(all('.dt-task-ticket').map(item => item.textContent)).toEqual([zh.pmsTicket.replace('{title}', 'Fix SDK pagination')])
@@ -116,7 +116,7 @@ it('keeps the archived filter when it returns from an opened archived task', asy
 it('words the inbox in English when the panel speaks English', async () => {
   await openTab(en)
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe(en.pmsTitle)
-  expect(all('.dt-inbox-filters .dt-pill').map(item => item.textContent)).toEqual([`${en.pmsFilterActive}2`, `${en.pmsFilterArchived}1`])
+  expect(all('.dt-inbox-filters .dt-pill').map(item => item.textContent)).toEqual([`${en.pmsFilterActive}2`, `${en.pmsFilterDeclined}1`, `${en.pmsFilterArchived}1`])
   await openTask('SDK pagination skips the first page')
   expect(all('.dt-chat-author').slice(0, 3).map(item => item.textContent)).toEqual(['Team Leader', en.pmsAgent, en.pmsYou])
   expect(composer()?.getAttribute('placeholder')).toBe(en.pmsReplyPlaceholder)
