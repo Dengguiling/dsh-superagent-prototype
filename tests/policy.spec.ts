@@ -30,12 +30,12 @@ const ticket = { id: 'ticket', ended: { at: '', by: 'executor', reason: 'closed'
 
 describe('source scope', () => {
   it('listens to configured chats, reads every message only where configured, and follows the direct-message switch', () => {
-    expect(sources.scope(feishu())).toEqual({ listened: true, observed: false, row: CHAT })
-    expect(sources.scope(feishu({ meta: { chatId: OBSERVED, direct: false, mentioned: false } }))).toEqual({ listened: true, observed: true, row: OBSERVED })
+    expect(sources.scope(feishu())).toEqual({ listened: true, observed: false, row: CHAT, relation: false })
+    expect(sources.scope(feishu({ meta: { chatId: OBSERVED, direct: false, mentioned: false } }))).toEqual({ listened: true, observed: true, row: OBSERVED, relation: false })
     expect(sources.scope(feishu({ meta: { chatId: 'oc_other', direct: false, mentioned: true } }))).toEqual({ listened: false, reason: 'chat_not_allowed' })
-    expect(sources.scope(feishu({ meta: { chatId: 'p2p', direct: true, mentioned: false } }))).toEqual({ listened: true, observed: false, row: 'direct' })
+    expect(sources.scope(feishu({ meta: { chatId: 'p2p', direct: true, mentioned: false } }))).toEqual({ listened: true, observed: false, row: 'direct', relation: false })
     expect(setup({ ...base, sources: { feishu: feishuSource({ chats: [], directMessages: false }) } }).sources.scope(feishu({ meta: { chatId: 'p2p', direct: true, mentioned: false } }))).toEqual({ listened: false, reason: 'direct_messages_not_allowed' })
-    expect(sources.scope(redmine('anyone'))).toEqual({ listened: true, observed: false, row: 'issue' })
+    expect(sources.scope(redmine('anyone'))).toEqual({ listened: true, observed: false, row: 'issue', relation: true })
   })
   it('listens to nothing from a configured Source whose plugin is not loaded, and keeps an invalid stored configuration disabled', () => {
     const bare = new SourceRegistry(() => base)
@@ -54,11 +54,11 @@ describe('gate', () => {
   it('grants explicit strength when the sender is allowed in its Source\'s part and the Source marked the Trigger addressed', () => {
     expect(policy.gate(feishu(), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { via: 'addressed', source: 'feishu', sender: 'Alice', addressed: 'mention', scope: { chatId: CHAT } } })
     expect(policy.gate(feishu({ addressed: 'direct', meta: { chatId: 'p2p', direct: true, mentioned: false } }), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { addressed: 'direct' } })
-    // Redmine account names compare without case; the entry's id names the sender when it has no display name.
-    expect(policy.gate(redmine('alice', 'mention'), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { source: 'redmine', sender: 'Alice' } })
   })
-  it('checks each Source\'s own list: a Feishu id allows nothing on Redmine', () => {
-    expect(policy.gate(redmine(MEMBER, 'mention'), thread(), [])).toEqual({ admissible: false, reason: 'not_a_member' })
+  it('keeps each Source to its own terms: a Feishu id allows nothing on Redmine, and Redmine keeps no list at all', () => {
+    expect(policy.gate({ ...feishu(), actor: { source: 'feishu', id: 'ou_stranger' } }, thread(), [])).toEqual({ admissible: false, reason: 'not_a_member' })
+    // Redmine admits by relation: whoever addresses the agent is explicit, and an identity on another Source is irrelevant.
+    expect(policy.gate(redmine(MEMBER, 'mention'), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { source: 'redmine', via: 'addressed', addressed: 'mention' } })
     expect(allowedSender(base, { source: 'redmine', id: 'ALICE' })).toEqual({ id: 'Alice' })
     expect(allowedSender(base, { source: 'feishu', id: 'Alice' })).toBeUndefined()
     expect(anyoneAllowed(base)).toBe(true)
@@ -72,6 +72,14 @@ describe('gate', () => {
     // A Thread a ticket follows only for context lends no follow-up: the admission table decides, as on any Thread.
     const context = { ...thread(['ticket']), context: ['ticket'] }
     expect(policy.gate(unaddressed(quiet), context, [ticket])).toMatchObject({ admissible: false })
+  })
+  it('admits an unaddressed Redmine message only where the Source observes the scope, through the unlisted cells of its table', () => {
+    const observing = setup(SettingsSchema.parse({ ...base, sources: { ...base.sources, redmine: { enabled: true, config: { observeIssues: true } } },
+      policy: { ...base.policy, sources: { ...base.policy.sources, redmine: { admission: { issue: { unlistedUnaddressed: 'inferred' } } } } } }))
+    expect(observing.policy.gate(redmine('someone'), thread(), [])).toMatchObject({ admissible: true, strength: 'inferred',
+      basis: { via: 'admission', cell: 'unlistedUnaddressed', row: 'issue', observation: { mode: 'auto' } } })
+    // Unobserved scopes only receive what speaks to the agent, and a stored list is inert on a relation Source.
+    expect(policy.gate(redmine('someone'), thread(), [])).toEqual({ admissible: false, reason: 'no_mention' })
   })
   it('infers strength for allowed senders\' messages the Source observes, unless Eval is off', () => {
     const observed = unaddressed({ meta: { chatId: OBSERVED, direct: false, mentioned: false } })
@@ -123,7 +131,7 @@ describe('admission table', () => {
   it('listens to mentions in chats that are not listed, as the row other, only when the Feishu card says so', () => {
     expect(sources.scope(inChat('oc_elsewhere'))).toEqual({ listened: false, reason: 'chat_not_allowed' })
     const others = setup(withTable({ other: { unlistedAddressed: 'explicit' } }, { otherChats: 'mentions' }))
-    expect(others.sources.scope(inChat('oc_elsewhere'))).toEqual({ listened: true, observed: false, row: 'other' })
+    expect(others.sources.scope(inChat('oc_elsewhere'))).toEqual({ listened: true, observed: false, row: 'other', relation: false })
     expect(others.policy.gate(inChat('oc_elsewhere'), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { row: 'other' } })
     expect(others.policy.gate(inChat('oc_elsewhere', STRANGER), thread(), [])).toMatchObject({ admissible: true, strength: 'explicit', basis: { row: 'other', cell: 'unlistedAddressed' } })
   })
@@ -456,11 +464,16 @@ describe('bots and events without a sender', () => {
   it('names a Redmine Trigger\'s receiving scope, which the Source observes where its switch is on', () => {
     const { sources } = setup(observing({ observeIssues: true }))
     const redmineScope = (meta: Record<string, unknown>) => ({ source: 'redmine', meta })
-    expect(sources.scope(redmineScope({ kind: 'issue', issueId: 3 }))).toEqual({ listened: true, observed: true, row: 'issue' })
-    expect(sources.scope(redmineScope({ kind: 'journal', issueId: 4 }))).toEqual({ listened: true, observed: false, row: 'journal' })
+    expect(sources.scope(redmineScope({ kind: 'issue', issueId: 3 }))).toEqual({ listened: true, observed: true, row: 'issue', relation: true })
+    expect(sources.scope(redmineScope({ kind: 'journal', issueId: 4 }))).toEqual({ listened: true, observed: false, row: 'journal', relation: true })
     const rows = redmineKind.policy!.rows!({ observeIssues: true })
     expect(rows.map(row => [row.id, row.cells])).toEqual([
-      ['issue', { listedUnaddressed: true, unlistedAddressed: true, unlistedUnaddressed: true }],
-      ['journal', { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false }]])
+      ['issue', { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: true }],
+      ['journal', { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: false }]])
+  })
+  it('keeps no sender list on a relation Source, and drops a retired one when the Policy part is validated', () => {
+    expect(redmineKind.policy!.fields).toEqual([])
+    expect(redmineKind.policy!.relation).toBe(true)
+    expect(redmineKind.policy!.schema.parse({ allowed: [{ id: 'Alice' }] })).toEqual({})
   })
 })

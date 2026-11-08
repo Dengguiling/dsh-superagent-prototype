@@ -119,11 +119,16 @@ export function LoadMore({ onMore }: { onMore: () => void }) {
   const { t } = usePanel()
   return <Button variant="outline" size="sm" icon={<Icon name="chevron-down" size={14} />} onClick={onMore}>{t('loadMore')}</Button>
 }
+/** How much of a list is on screen, so a truncated list does not look like the whole one. */
+export function ListTotal({ shown, total }: { shown: number; total: number }) {
+  const { t } = usePanel()
+  return <p className="dt-hint dt-list-total">{t('listTotal', { shown, total })}</p>
+}
 
-export function StatusHead({ hint, settings }: { hint: string; settings?: SettingsGroup }) {
+export function StatusHead({ title, hint, settings }: { title: string; hint: string; settings?: SettingsGroup }) {
   const { t, navigate } = usePanel()
   return <div className="dt-status-head">
-    <h2 className="dt-status-title">{t('statusTitle')}<InfoTip text={hint} /></h2>
+    <h2 className="dt-status-title">{title}<InfoTip text={hint} /></h2>
     {settings && <Button variant="ghost" size="sm" icon={<Icon name="settings" />}
       onClick={() => navigate(settingsRoute(settings))}>{t('tab.settings')}</Button>}
   </div>
@@ -131,7 +136,8 @@ export function StatusHead({ hint, settings }: { hint: string; settings?: Settin
 export function PageHead({ title, children }: { title: ReactNode; children?: ReactNode }) {
   const { back, backLabel } = usePanel()
   return <div className="dt-page-head">
-    <Button variant="ghost" size="sm" icon={<Icon name="chevron-left" />} onClick={back}>{backLabel}</Button>
+    {/* The back button only exists when there is somewhere to go back to. */}
+    {backLabel && <Button variant="ghost" size="sm" icon={<Icon name="chevron-left" />} onClick={back}>{backLabel}</Button>}
     <div className="dt-page-title"><h2>{title}</h2>{children && <span className="dt-actions">{children}</span>}</div>
   </div>
 }

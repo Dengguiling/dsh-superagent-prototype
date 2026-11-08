@@ -88,8 +88,8 @@ export function search(host: ViewHost, query: string, links: Pick<TextCache, 'en
 }
 export type SearchView = ReturnType<typeof search>
 export function decisionList(host: ViewHost, kinds: string[], offset: number, limit: number, since = '') {
-  const { items, more } = host.store.read.decisions({ kinds, since }, offset, limit)
+  const { items, more, total } = host.store.read.decisions({ kinds, since }, offset, limit)
   const view = snapshot(host)
-  return { items: items.map(decision => decisionView(view, decision)), next_offset: more ? offset + limit : null }
+  return { items: items.map(decision => decisionView(view, decision)), next_offset: more ? offset + limit : null, total }
 }
 export type DecisionListView = ReturnType<typeof decisionList>

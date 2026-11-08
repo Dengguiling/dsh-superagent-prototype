@@ -14,30 +14,26 @@ export interface PipelineStation {
   label: string
   /** The number of items in the stage. */
   count: number
-  /** The one line under the count that says what the count measures. */
-  note: string
+  /** What the count measures: the kind of item, so two stations are never read as the same thing. */
+  unit: string
+  /** The window the count covers. */
+  window: string
   /** How the station reads. */
   tone: StationTone
   /** Opens the list of the stage; a station without one is static. */
   onOpen?: () => void
 }
 
-/** Percent width of a station's bar: its count against the largest count of the pipeline, so that the stations compare. */
-function share(stations: PipelineStation[]): (station: PipelineStation) => string {
-  const most = Math.max(1, ...stations.map(station => station.count))
-  return station => `${Math.round(station.count / most * 100)}%`
-}
-/** The body of one station: its light and name, its count, what the count measures, and its bar. */
-function StationBody({ station, width }: { station: PipelineStation; width: string }) {
+/** The body of one station: its light and name, its count, what the count measures, and the window it covers. */
+function StationBody({ station }: { station: PipelineStation }) {
   return <>
     <span className="dt-station-head">
       <span className="dt-station-light" data-tone={station.tone} aria-hidden="true" />
       <span className="dt-station-label">{station.label}</span>
     </span>
     <span className="dt-station-count">{station.count}</span>
-    <span className="dt-station-note">{station.note}</span>
-    <span className="dt-station-bar" aria-hidden="true"><span className="dt-station-fill" data-tone={station.tone}
-      style={{ width }} /></span>
+    <span className="dt-station-unit">{station.unit}</span>
+    <span className="dt-station-window">{station.window}</span>
   </>
 }
 
@@ -46,10 +42,9 @@ function StationBody({ station, width }: { station: PipelineStation; width: stri
  * the station before them holds work, so a paused pipeline stands still.
  */
 export function PipelineChart({ stations, flowing }: { stations: PipelineStation[]; flowing: boolean }) {
-  const width = share(stations)
   return <div className="dt-pipe" data-flow={flowing || undefined}>
     {stations.map((station, index) => {
-      const body: ReactNode = <StationBody station={station} width={width(station)} />
+      const body: ReactNode = <StationBody station={station} />
       return <Fragment key={station.id}>
         {index > 0 && <span className="dt-pipe-link" aria-hidden="true" data-live={flowing && stations[index - 1]!.count > 0
           || undefined}><i className="dt-pipe-dot" /></span>}

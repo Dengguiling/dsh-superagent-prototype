@@ -30,7 +30,7 @@ it('saves this machine\'s settings in the Deployment settings through DSH\'s con
   expect(field<HTMLInputElement>(zh.deploymentContextTimeout).value).toBe('20000')
 })
 
-it('keeps a refused Deployment change as a draft, and shows the settings read-only without a writable form', async () => {
+it('keeps a refused Deployment change as a draft across a reload, and shows the settings read-only without a writable form', async () => {
   const refusing = fakeForm(true, false)
   server.form = refusing.form
   at({ page: 'settings', query: { group: 'deployment' } })
@@ -42,10 +42,12 @@ it('keeps a refused Deployment change as a draft, and shows the settings read-on
   server.form = fakeForm(false).form
   await remount()
   expect(text()).toContain(zh.deploymentReadOnly)
+  // The refused change is kept as a draft, so a reload does not lose it.
+  expect(field<HTMLInputElement>(zh.deploymentPromptMaxChars).value).toBe('200000')
   server.form = undefined
   await remount()
   expect(text()).toContain('这个 DSH 版本不提供配置表单')
-  expect(field<HTMLInputElement>(zh.deploymentPromptMaxChars)).toMatchObject({ disabled: true, value: '100000' })
+  expect(field<HTMLInputElement>(zh.deploymentPromptMaxChars)).toMatchObject({ disabled: true, value: '200000' })
   expect(all('button').some(button => button.textContent === '保存')).toBe(false)
 })
 
@@ -82,7 +84,7 @@ it('renders the Deployment page with the derived accounts in the Plugin Manager,
   expect(container.textContent).toBe('')
   server.form = fakeForm().form
   await render('page')
-  for (const fact of ['@agent-bot', 'alice · demo', 'agent-bot · widgets', 'Widgets Bot', '账号在 dsh-superagent 面板的来源设置里修改。']) expect(text()).toContain(fact)
+  for (const fact of ['@agent-bot', 'alice', 'agent-bot · widgets', 'Widgets Bot', '账号在 dsh-superagent 面板的来源设置里修改。']) expect(text()).toContain(fact)
   server.setup = { ...server.setup, problem: problemOf('redmineUrlUnset'), accounts: null }
   await render('page')
   expect(text()).toContain('部署检查未通过：Redmine 来源没有设置地址。')
@@ -112,18 +114,18 @@ it('tells a dsh-superagent that is starting from a browser that cannot write on 
 it('reads the state every second after a setup check, until dsh-superagent stopped answering and answers again', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   onTestFinished(() => { vi.useRealTimers() })
-  server.setup = { ...server.setup, problem: problemOf('gerritUrlUnset'), accounts: null }
+  server.setup = { ...server.setup, problem: problemOf('gerritUserUnset'), accounts: null }
   at({ page: 'settings', query: { group: 'deployment' } })
   await mount()
   await click(zh.setupCheck)
   const second = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(1000) }); await settle() }
   server.down = true
   await second()
-  expect(text()).toContain(zh['setup.gerritUrlUnset'])
+  expect(text()).toContain(zh['setup.gerritUserUnset'])
   server.down = false
   server.setup = { ...server.setup, problem: null }
   await second()
-  expect(text()).not.toContain(zh['setup.gerritUrlUnset'])
+  expect(text()).not.toContain(zh['setup.gerritUserUnset'])
   // Once it answers, the state is read every five seconds again.
   const reads = server.requests.filter(request => request.path === 'state').length
   await act(async () => { await vi.advanceTimersByTimeAsync(3000) }); await settle()
@@ -133,7 +135,7 @@ it('reads the state every second after a setup check, until dsh-superagent stopp
 it('ends a restart that never stopped answering after half a minute, and reads the state every five seconds again', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   onTestFinished(() => { vi.useRealTimers() })
-  server.setup = { ...server.setup, problem: problemOf('gerritUrlUnset'), accounts: null }
+  server.setup = { ...server.setup, problem: problemOf('gerritUserUnset'), accounts: null }
   at({ page: 'settings', query: { group: 'deployment' } })
   await mount()
   await click(zh.setupCheck)

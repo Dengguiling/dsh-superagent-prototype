@@ -26,7 +26,7 @@ import { join } from 'node:path'
 const MEMBER = 'ou_alice'
 function host(overrides: Partial<SourceContextDeps> = {}) {
   const store = new Store(join(mkdtempSync(join(tmpdir(), 'sources-')), 'db.sqlite'))
-  const settings = SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: 'oc_team' }, redmine: { allowed: [{ id: 'alice' }] }, gerrit: { allowed: [{ id: 'bob' }] } } }, eval: { mode: 'auto' }, sources: { feishu: { enabled: true, config: { chats: [{ chatId: 'oc_team', listen: 'mentions' }, { chatId: 'oc_observed', listen: 'all' }], directMessages: true } }, redmine: { enabled: true, config: { baseUrl: 'http://redmine.test', apiKey: 'key', login: 'agent', project: 'demo' } }, gerrit: { enabled: true, config: { httpUrl: 'http://gerrit.test:8080', project: 'demo', user: 'agent', password: 'secret', branch: 'main' } } } })
+  const settings = SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: 'oc_team' }, redmine: { allowed: [{ id: 'alice' }] }, gerrit: { allowed: [{ id: 'bob' }] } } }, eval: { mode: 'auto' }, sources: { feishu: { enabled: true, config: { chats: [{ chatId: 'oc_team', listen: 'mentions' }, { chatId: 'oc_observed', listen: 'all' }], directMessages: true } }, redmine: { enabled: true, config: { baseUrl: 'http://redmine.test', apiKey: 'key' } }, gerrit: { enabled: true, config: { httpUrl: 'http://gerrit.test:8080', project: 'demo', user: 'agent', password: 'secret' } } } })
   store.saveSettings(settings)
   const board = new HealthBoard()
   const sources = new SourceRegistry(() => store.settings(), board)
@@ -287,7 +287,7 @@ describe('feishu source', () => {
     expect(sync.ready({ allowed: [] })).toBe(false)
     const signal = new AbortController().signal
     expect(await sync.run(h, { allowed: [{ id: MEMBER, name: 'Alice' }, { id: 'ou_bob', name: 'Bob' }], syncChat: 'oc_team' }, signal))
-      .toEqual({ allowed: [{ id: MEMBER, name: 'Alice Li' }, { id: 'ou_carol', name: 'Carol' }], syncChat: 'oc_team' })
+      .toEqual({ allowed: [{ id: MEMBER, name: 'Alice Li' }, { id: 'ou_carol', name: 'Carol' }], syncChat: 'oc_team', admission: {} })
     expect(withSignal).toHaveBeenCalledWith(signal)
     expect(lark.mock.calls[0]![0]).toEqual(expect.arrayContaining(['+chat-members-list', '--chat-id', 'oc_team']))
     lark.mockResolvedValue({ users: [], has_more: true })
@@ -524,7 +524,7 @@ it('reports the task system as failing only after the configured number of conse
   expect(pollFailure(1, 3, eof)).toBeUndefined()
   expect(pollFailure(2, 3, eof)).toBeUndefined()
   expect(pollFailure(3, 3, eof)).toEqual({ state: 'error', detail: '3 consecutive failed polls; last: Error: Get "http://redmine.test/issues.json": EOF', code: 'pollFailures', values: { count: '3', error: 'Error: Get "http://redmine.test/issues.json": EOF' } })
-  expect(redmineKind.schema.parse({})).toEqual({ baseUrl: '', apiKey: '', project: '', login: '', pollSeconds: 30, failuresBeforeError: 3,
+  expect(redmineKind.schema.parse({})).toEqual({ baseUrl: '', apiKey: '', pollSeconds: 30, failuresBeforeError: 3,
     pageSize: 100, observeIssues: false, observeJournals: false })
 })
 describe('feishu event consumer', () => {

@@ -8,7 +8,7 @@ Every part of the project is judged by the attention it costs. A message, a noti
 
 ## What follows for the agent
 
-- **It acts only when asked, or when a written rule allows it.** A request counts only when it addresses the agent directly and comes from a person the team allowed: one on an allowed list, or anyone in a conversation the team opened to requests. Work nobody asked for needs a rule the team wrote, and starts in a mode that only records what the agent would have done.
+- **It acts only when asked, or when a written rule allows it.** A request counts only when it addresses the agent directly: a task assigned to it, a mention of it, or a review comment on its own patch — and, on a Source that keeps a list, from a person the team allowed. Work nobody asked for needs a rule the team wrote, and starts in a mode that only records what the agent would have done.
 - **It speaks only when a person must act or can use a result.** It confirms a request once and names what it will do. It stays quiet while it works. It writes again when a result is ready, when it needs a decision, or when it cannot finish. Messages are short and go to the conversation where the request was made.
 - **It asks one concrete question at a time,** in a structured form, so the question reaches the person instead of staying inside a long report.
 - **It stops by impact, not by effort.** A local change goes as far as a reviewable result. A change that needs a design decision stops with a clear question.
@@ -25,7 +25,7 @@ Every part of the project is judged by the attention it costs. A message, a noti
 
 The agent writes notes on issues, submits patches for review and messages people under accounts your team sees every day. Every message it sends costs your colleagues' attention, and you are responsible for it. The more the agent can do, the more care its operator owes the team:
 
-- **Start narrow.** Begin with a short allowed list and with proactive work only recorded. Widen both once what the agent would have done looks right.
+- **Start narrow.** Begin with proactive work only recorded and with the observe switches of the Sources off. Widen both once what the agent would have done looks right.
 - **Tune for less noise.** When the agent is noisy, make its prompts shorter and stricter, or pause it. Do not add more messages to explain the noise.
 - **Do not use it to produce volume.** Mass patches, broadcast messages and busywork cost the team more than they give.
 - **Own what it says.** Read what the agent posts in your name, and correct it in the prompts when it is wrong.

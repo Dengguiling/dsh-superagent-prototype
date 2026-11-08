@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from 'react'
 import { ApiError, usePoll, type TicketPageView } from './api.ts'
 import { DisclosureRow, Dot, Icon, Tag, type IconName } from './controls.tsx'
-import { decisionMark, reportDot, ticketMark } from './marks.ts'
+import { decisionMark, reportDot, ticketMark, reportMark } from './marks.ts'
 import { usePanel } from './provider.tsx'
 import { settingsRoute } from './route.ts'
 import { Earlier, ThreadLine, automatedRuns } from './rows.tsx'
@@ -52,7 +52,8 @@ function Assignments({ ticket }: { ticket: TicketPageView }) {
       <div className="dt-row-title">{t('assignmentNumber', { number: ticket.assignments.length - index })}</div>
       <div className="dt-row-meta">
         {/* A running Assignment whose worker reported a non-progress state has ended its turn; show that report as its tag and end its span there. */}
-        {item.turnEndedAt && item.report ? <Tag tone="neutral">{report(item.report.state)}</Tag> : <Tag tone={item.state === 'running'
+        {/* A report reads with its own mark, so a failed report looks the same here as in the assignment list. */}
+        {item.turnEndedAt && item.report ? <Tag tone={reportMark(item.report.state).tone}>{report(item.report.state)}</Tag> : <Tag tone={item.state === 'running'
           ? 'info'
           : 'neutral'}>{valueLabel(t, 'assignment', item.state)}</Tag>}
         {item.state !== 'running' && item.report && <span>{report(item.report.state)}</span>}

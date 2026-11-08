@@ -109,24 +109,13 @@ The prepare command is optional. Without one, the Ticket's directory stays empty
 
 ## The Policy
 
-Under *Settings* → *Policy* → *Eval → On each Source*, the Redmine Source lists the people whose issues and journals may start work, and the Gerrit Source lists the people whose review comments may. In this company both lists name the leader:
+Under *Settings* → *Eval* → *On each Source*, Redmine and Gerrit keep no sender list. Both Sources admit by relation: whatever speaks to the agent there is an explicit request, whoever wrote it — the whole company can raise a task, and every reviewer can comment on a patch, without anyone being registered anywhere.
 
-| Source | The allowed entry | What it allows |
-| --- | --- | --- |
-| Redmine | `团队负责人`, the display name Redmine shows | the issues and the journals of the leader start the work |
+A Redmine request addresses the agent when the issue is assigned to the bound account, when a journal reassigns the issue to it, or when the text holds `@<login>`. A Gerrit request addresses it when the review comment sits on one of the agent's own changes — the conversation with the patch owner is the request. Both are the conventions those systems have, not mentions of their own.
 
-The names are trimmed before they are compared: Redmine joins the first and the
-last name of an account with a space, and a Chinese name has no first name, so
-the name arrives with a leading space.
-| Gerrit | `lead`, the user name Gerrit reports | the review comments of the leader start the follow-up work |
+Everything that does not speak to the agent — an issue that names nobody, a comment on somebody else's patch — is decided by the admission table, and by default it is ignored. Turn on the receive-all switch of a scope to let such messages become inferred candidates for an assessment.
 
-Redmine's API reports the **display name** of an author beside its id, and no login, so the Redmine list holds the names Redmine shows. The Gerrit list holds the user names of Gerrit, which is what its API reports.
-
-The leader is on the list and the developer is not, because the leader assigns the work and merges the patches. The developer does the work, and the superagent helps the developer; a request of the developer starts no new work, it is input on the ticket the superagent already works.
-
-A Redmine request addresses the agent when the issue is assigned to the bound account, or when the text holds `@<login>`. A Gerrit request addresses it when the review comment holds `@<account>`. Both are the conventions those systems have, not mentions of their own.
-
-An issue that arrives while the agent works reaches the worker as a follow-up, whether or not it mentions the agent, as long as the person who wrote it is on the list.
+An issue that arrives while the agent works reaches the worker as a follow-up, whether or not it mentions the agent and whoever wrote it.
 
 ## What the worker does
 
@@ -137,7 +126,7 @@ git clone "$DSH_SUPERAGENT_GERRIT_SSH_URL" .
 git switch -c "agent/$DSH_SUPERAGENT_NAME"
 CHANGE_ID="I$(openssl rand -hex 20)"
 git commit -m "Fix the login redirect" -m "Issue: $DSH_SUPERAGENT_REDMINE_ISSUE_ID" -m "Change-Id: $CHANGE_ID"
-git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:$DSH_SUPERAGENT_GERRIT_PUSH_REF"
+git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:refs/for/${DSH_SUPERAGENT_GERRIT_BRANCH:-$(git branch --show-current)}"
 ```
 
 The `Issue:` trailer is what names the ticket on the change: it is how the change is tracked and bound to the Ticket, in whatever repository it lives. The change's topic, which the push option sets, carries the ticket's branch name and is kept for installations that already rely on it. The `Change-Id` trailer is what Gerrit itself requires.

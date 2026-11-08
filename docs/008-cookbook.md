@@ -232,6 +232,7 @@ If messages reply to earlier messages, add `repliesTo(trigger)`. It returns the 
 - `rows(config)` lists admission scopes and their available cells. Each row id must match the `row` returned by `scope`. Unaddressed-message cells are available only where the Source observes those messages. Kinds without `rows` use default cells.
 - Optional `bots` lists bots eligible for inferred candidacy, using the same entry shape as `allowed`. Without it, no bot is admitted.
 - Optional `sync: {label, ready(part), run(host, part, signal)}` refreshes membership at startup and on **Sync now**. Feishu uses chat membership. Failures appear under `sync:<id>` and retry after one minute, doubling to one hour until successful.
+- A kind that admits by relation instead of a list — Redmine and Gerrit, where whatever addresses the agent is a request from anyone — declares `relation: true`, keeps `allowed` out of its `schema`, and leaves `fields` empty. The gate then treats every addressed Trigger as an explicit request, and its rows keep only the cell for messages that do not speak to the agent. A saved `allowed` on such a kind is dropped as retired when the Policy part is validated.
 
 ### 8. Variables for the Executor
 

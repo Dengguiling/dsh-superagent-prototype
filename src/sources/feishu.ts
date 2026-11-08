@@ -18,6 +18,15 @@ const MembersSchema = z.looseObject({
   users: z.array(z.looseObject({ member_id: z.string(), name: z.string() })),
   has_more: z.boolean(), truncations: z.array(z.unknown()).optional(),
 })
+/** The Feishu Source's part of the Policy: the senders who may originate work, the chat they sync from, and the bots kept as candidates. */
+const FeishuPolicySchema = z.object({
+  allowed: z.array(z.object({ id: z.string().regex(/^ou_[a-zA-Z0-9]+$/), name: z.string().trim().max(100).optional() }).strict())
+    .refine(users => new Set(users.map(user => user.id)).size === users.length, 'Duplicate open_ids').default([]),
+  syncChat: z.string().regex(/^(oc_[a-zA-Z0-9]+)?$/).default(''),
+  bots: z.array(z.object({ id: z.string().regex(/^(cli|ou)_[a-zA-Z0-9]+$/), name: z.string().trim().max(100).optional() }).strict())
+    .refine(bots => new Set(bots.map(bot => bot.id)).size === bots.length, 'Duplicate bot ids').optional(),
+}).strict()
+type FeishuPolicy = z.infer<typeof FeishuPolicySchema>
 const FeishuConfigSchema = FeishuBotSchema.extend({
   readPageSize: z.number().int().min(1).max(50).default(20),
   linkTimeoutMs: z.number().int().min(1).max(90000).default(5000),
@@ -30,6 +39,7 @@ const FeishuConfigSchema = FeishuBotSchema.extend({
 export type FeishuConfig = z.infer<typeof FeishuConfigSchema>
 export const feishuKind: SourceKind<FeishuConfig> = {
   kind: SOURCE,
+  order: 3,
   refreshLabels: (host, signal) => refreshChatNames(sourceContext(host, feishuKind), signal),
   title: { zh: '飞书', en: 'Feishu' },
   description: { zh: '接收下列群和私聊中发给机器人的消息，补收群历史并轮询订阅的线程。', en: 'Receives messages to the bot in these chats and direct messages, recovers chat history and polls subscribed Threads.' },
@@ -69,13 +79,7 @@ export const feishuKind: SourceKind<FeishuConfig> = {
   repliesTo: trigger => typeof trigger.meta.parentId === 'string' ? feishuTriggerId(trigger.meta.parentId) : undefined,
   policy: {
     unnamed: { person: { zh: '飞书用户', en: 'Feishu user' }, bot: { zh: '飞书机器人', en: 'Feishu bot' } },
-    schema: z.object({
-      allowed: z.array(z.object({ id: z.string().regex(/^ou_[a-zA-Z0-9]+$/), name: z.string().trim().max(100).optional() }).strict())
-        .refine(users => new Set(users.map(user => user.id)).size === users.length, 'Duplicate open_ids').default([]),
-      syncChat: z.string().regex(/^(oc_[a-zA-Z0-9]+)?$/).default(''),
-      bots: z.array(z.object({ id: z.string().regex(/^(cli|ou)_[a-zA-Z0-9]+$/), name: z.string().trim().max(100).optional() }).strict())
-        .refine(bots => new Set(bots.map(bot => bot.id)).size === bots.length, 'Duplicate bot ids').optional(),
-    }).strict(),
+    schema: FeishuPolicySchema,
     fields: [
       { key: 'allowed', type: 'rows', label: { zh: '能发起工作的飞书用户', en: 'Feishu users who may originate work' },
         columns: [{ key: 'id', type: 'text', label: { zh: 'open_id', en: 'open_id' }, pattern: 'ou_[a-zA-Z0-9]+' }, { key: 'name', type: 'text', label: { zh: '名字', en: 'Name' }, optional: true }] },
@@ -103,15 +107,18 @@ export const feishuKind: SourceKind<FeishuConfig> = {
       label: { zh: '立即同步', en: 'Sync now' },
       ready: part => !!part.syncChat,
       async run(host, part, signal) {
+        // The part arrives with its parsed `admission`; the schema validates the rest, and the table is kept on the way back.
+        const { admission = {}, ...rest } = part as Record<string, unknown> & { admission?: unknown }
+        const current = FeishuPolicySchema.parse(rest)
         const commands = sourceContext(host, feishuKind).commands.withSignal(signal)
-        const chat = String(part.syncChat)
+        const chat = String(current.syncChat)
         const members = ['im', '+chat-members-list', '--chat-id', chat, '--member-types', 'user', '--page-all', '--page-limit', '0']
         const result = MembersSchema.parse(await commands.lark(members))
         if (result.has_more || result.truncations?.length) throw new Error('Feishu returned an incomplete member list')
         // Preserve existing member order so policy version hashes stay stable; update names in place and append new members.
         const users = new Map(result.users.map(user => [user.member_id, user.name]))
-        const known = new Set(part.allowed.map(entry => entry.id))
-        return { ...part, allowed: [...part.allowed.filter(entry => users.has(entry.id)).map(entry => ({ ...entry, name: users.get(entry.id)! })), ...result.users.filter(user => !known.has(user.member_id)).map(user => ({ id: user.member_id, name: user.name }))] }
+        const known = new Set(current.allowed.map(entry => entry.id))
+        return { ...current, admission, allowed: [...current.allowed.filter(entry => users.has(entry.id)).map(entry => ({ ...entry, name: users.get(entry.id)! })), ...result.users.filter(user => !known.has(user.member_id)).map(user => ({ id: user.member_id, name: user.name }))] }
       },
     },
   },

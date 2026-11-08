@@ -1,0 +1,25 @@
+/* The command palette: a dialog with a search field and the list of what it holds, styled with DSH `--dsw-alias-*` tokens; one rule per line. */
+.dt-modal.dt-palette { width: min(560px, 100%); padding: 0; gap: 0; }
+/* The search field is the top of the dialog; the name of the dialog is on it, so its header stays out of the way. */
+.dt-modal.dt-palette .dt-modal-header { display: none; }
+.dt-modal.dt-palette .dt-modal-body { padding: 0; overflow: hidden; }
+.dt-modal.dt-palette .dt-modal-footer { padding: 0; }
+.dt-palette-search { padding: 12px 16px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.dt-palette-search .dt-input { display: flex; width: 100%; height: 36px; border: none; background: transparent; }
+.dt-palette-search .dt-input:focus-within { border-color: transparent; }
+.dt-palette-search .dt-input input { font-size: var(--dsw-font-s-14-font-size); line-height: var(--dsw-font-s-14-line-height); }
+.dt-palette-list { list-style: none; margin: 0; padding: 6px; max-height: 320px; overflow: auto; }
+.dt-palette-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.dt-palette-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dt-palette-option[data-selected] { background: var(--dsw-alias-interactive-bg-hover); }
+.dt-palette-option[data-selected] .dt-palette-label { color: var(--dsw-alias-label-primary); font-weight: 600; }
+.dt-palette-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dsw-font-s-14-font-size); line-height: var(--dsw-font-s-14-line-height); color: var(--dsw-alias-label-secondary); }
+.dt-palette-count { flex: none; font-size: var(--dsw-font-xxs-12-font-size); line-height: var(--dsw-font-xxs-12-line-height); color: var(--dsw-alias-state-warn-primary); }
+.dt-palette-hint { flex: none; font-size: var(--dsw-font-xxs-12-font-size); line-height: var(--dsw-font-xxs-12-line-height); color: var(--dsw-alias-label-tertiary); }
+.dt-palette-empty { margin: 0; padding: 14px 16px 18px; font-size: var(--dsw-font-xs-13-font-size); line-height: var(--dsw-font-xs-13-line-height); color: var(--dsw-alias-label-tertiary); }
+.dt-palette-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; border-top: 0.5px solid var(--dsw-alias-border-l3); font-size: var(--dsw-font-xxs-12-font-size); line-height: var(--dsw-font-xxs-12-line-height); color: var(--dsw-alias-label-tertiary); }
+/* The header's button that opens the palette, with the shortcut it opens with. */
+.dt-palette-trigger { color: var(--dsw-alias-label-tertiary); }
+.dt-palette-key { font: inherit; font-size: var(--dsw-font-xxxs-11-font-size); line-height: var(--dsw-font-xxxs-11-line-height); padding: 1px 6px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 4px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
+/* The Settings group tab says that a setting waits to be saved, without saying it in words. */
+.dt-column[data-unsaved='settings'] .dt-grouptabs #dt-tab-settings::after { content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 6px; border-radius: 50%; background: var(--dsw-alias-state-warn-primary); vertical-align: middle; }

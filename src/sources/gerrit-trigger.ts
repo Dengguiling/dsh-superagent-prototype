@@ -23,20 +23,23 @@ const threadsOf = (change: { _number: number }, issue?: string): ThreadRef[] =>
 export const isRobot = (name: string | undefined): boolean => !!name && /\b(bot|robot|jenkins|continuous)\b/i.test(name)
 /**
  * Builds the Trigger of one review comment on a change. A comment the agent itself wrote, or a robot's, produces no
- * Trigger of its own; the agent's own comments are its work, not a request. `issue` is the Redmine issue the change's
- * commit message names, when it names one.
+ * Trigger of its own; the agent's own comments are its work, not a request. A comment on one of the agent's own changes
+ * is `direct`ly addressed to it — the owner conversation of its patch is the request, whoever writes it. `issue` is the
+ * Redmine issue the change's commit message names, when it names one.
  */
-export function commentTrigger(change: { _number: number; id: string; project: string; branch: string; topic?: string | null },
+export function commentTrigger(change: { _number: number; id: string; project: string; branch: string; topic?: string | null; owner?: { username?: string; name?: string } | null },
   comment: { id: string; message: string; author?: { username?: string; name?: string } | null; created?: string | null, path?: string | null; line?: number | null },
   agent: string, httpUrl: string, issue?: string): Trigger | undefined {
   const author = accountOf(comment.author)
   if (agent && sameName(author, agent)) return undefined
+  const own = !!agent && !!change.owner && sameName(accountOf(change.owner), agent)
   const text = comment.message.trim()
   if (!text) return undefined
   const place = comment.path ? `${comment.path}${comment.line != null ? `:${comment.line}` : ''}` : ''
   return { id: key('gerrit-comment', change.id, comment.id), source: SOURCE,
     threads: threadsOf(change, issue),
     actor: { source: SOURCE, id: author }, human: !isRobot(author),
+    ...own ? { addressed: 'direct' as const } : {},
     at: comment.created ?? new Date().toISOString(), text: place ? `${place}\n\n${text}` : text,
     channel: gerritChannel(change._number, change.project), url: `${httpUrl.replace(/\/+$/, '')}/#/c/${change.project}/+/${change._number}`,
     meta: { kind: 'comment', changeNumber: change._number, changeId: change.id, project: change.project, branch: change.branch,

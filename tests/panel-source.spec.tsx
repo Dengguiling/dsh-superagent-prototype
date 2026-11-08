@@ -3,33 +3,33 @@
 import { act } from 'react'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
-import { usePanel, mount, remount, settle, all, find, tab, click, type, text, field, at } from './fixtures/panel.tsx'
+import { usePanel, mount, remount, settle, all, find, tab, click, type, text, field, at, openPage } from './fixtures/panel.tsx'
 import { server, problemOf, droppedReply } from './fixtures/panel-server.ts'
 
 usePanel()
 it('shows each Source\'s state on the Source status and opens its settings from a setup problem', async () => {
   await mount()
-  await click(zh['tab.source'])
-  expect(document.querySelector('.dt-status-title')?.textContent).toBe(zh.statusTitle)
+  await openPage(zh, 'source')
+  expect(document.querySelector('.dt-status-title')?.textContent).toBe(zh['tab.source'])
   expect(all('.dt-form > .dt-list > .dt-row .dt-row-name').map(title => title.textContent)).toEqual(['飞书', 'Redmine', 'Gerrit'])
   expect(all('.dt-form > .dt-list > .dt-row')[0]!.querySelector('.dt-row-meta')?.textContent).toBe('24 小时到达 12被过滤 2最近 ' + document.querySelector('.dt-row-meta time, .dt-row-meta .dt-lv:last-child .dt-lv-value')?.textContent)
   expect(text()).toContain(zh['sourceState.error'])
   expect(text()).toContain('socket closed')
   expect(all('.dt-card')).toHaveLength(0)
-  server.setup = { ...server.setup, problem: problemOf('gerritUrlUnset') }
+  server.setup = { ...server.setup, problem: problemOf('gerritUserUnset') }
   await remount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   await click(zh.sourceOpenSettings)
   expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['term.source'])
-  expect(all('.dt-card')[2]!.textContent).toContain('部署检查未通过：Gerrit 来源没有设置地址。')
+  expect(all('.dt-card')[2]!.textContent).toContain('部署检查未通过：Gerrit 来源没有设置账号。')
 })
 
 it('folds more than six chats into a line of their names', async () => {
   const chats = Array.from({ length: 7 }, (_, n) => ({ chatId: n ? `oc_c${n}` : 'oc_team', listen: 'all' as const }))
   server.settings.sources.feishu = { ...server.settings.sources.feishu!, config: { ...server.settings.sources.feishu!.config, chats } }
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   const summary = all('.dt-card')[0]!.querySelector('.dt-rows-summary')!
   expect(summary.textContent).toBe(['团队群', 'oc_c1', 'oc_c2', 'oc_c3', 'oc_c4', 'oc_c5', 'oc_c6'].join('、'))
@@ -37,7 +37,7 @@ it('folds more than six chats into a line of their names', async () => {
 
 it('rereads the chats the bot has joined on request and says which are new, keeping unsaved edits', async () => {
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   const feishu = () => all('.dt-card')[0]!
   const button = () => [...feishu().querySelectorAll('button')].find(item => item.textContent === '刷新群列表')!
@@ -61,7 +61,7 @@ it('rereads the chats the bot has joined on request and says which are new, keep
 
 it('renders each Source\'s settings from its kind\'s fields and saves one Source against its own revision', async () => {
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   const cards = all('.dt-card')
   expect(cards.map(card => card.querySelector('.dt-row-title')?.firstChild?.textContent)).toEqual(['飞书', 'Redmine', 'Gerrit'])
@@ -98,17 +98,17 @@ it('saves the Redmine account the agent acts as, and the fields of its own card'
   await click(tab(zh['tab.settings']))
   const redmine = all('.dt-card')[1]!
   const labels = () => [...redmine.querySelectorAll('label')].map(label => label.textContent)
-  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '绑定的 Redmine 账号', '监听的项目'])
+  expect(labels()).toEqual(['Redmine 地址', 'API 密钥'])
   expect(field<HTMLInputElement>('Redmine 地址').value).toBe('http://redmine.test')
   await click([...redmine.querySelectorAll<HTMLElement>('[data-disclosure-row]')].find(row => row.textContent?.includes('高级'))!)
-  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '绑定的 Redmine 账号', '监听的项目', '轮询间隔 / 秒', '连续失败几次后报告异常'])
+  expect(labels()).toEqual(['Redmine 地址', 'API 密钥', '轮询间隔 / 秒', '连续失败几次后报告异常'])
   expect(all('.dt-card')[0]!.textContent).toContain('当前机器人 Widgets Bot')
-  await type(field<HTMLInputElement>('绑定的 Redmine 账号'), 'agent-bot')
+  await type(field<HTMLInputElement>('API 密钥'), 'other-key')
   // The account is read by setup, so the bar warns that saving restarts dsh-superagent and interrupts running work.
   expect(redmine.textContent).toContain('保存会重启 dsh-superagent：2 个进行中的派工会中断，并带恢复说明重新开始。')
   await act(async () => { redmine.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle()
-  expect(server.settings.sources.redmine!.config).toMatchObject({ login: 'agent-bot' })
-  expect(field<HTMLInputElement>('绑定的 Redmine 账号').value).toBe('agent-bot')
+  expect(server.settings.sources.redmine!.config).toMatchObject({ apiKey: 'other-key' })
+  expect(field<HTMLInputElement>('API 密钥').value).toBe('other-key')
 })
 
 it('keeps a saved account on screen while dsh-superagent restarts', async () => {
@@ -128,36 +128,38 @@ it('keeps a saved account on screen while dsh-superagent restarts', async () => 
 })
 
 it('points a setup problem at the settings that fix it', async () => {
-  server.setup = { ...server.setup, problem: problemOf('gerritUrlUnset'), accounts: null }
+  server.setup = { ...server.setup, problem: problemOf('gerritUserUnset'), accounts: null }
   // Nothing runs while the deployment check waits, so the task system does not answer.
   server.pms = { ...server.pms, source: { ...server.pms.source, connected: false } }
   // jsdom has no scrolling; mock scrollIntoView to record which card the link brings into view.
   const scroll = vi.fn()
   Element.prototype.scrollIntoView = scroll
   await mount()
+  await openPage(zh, 'pipeline')
   expect(text()).toContain(zh.problemSetup)
-  expect(text()).toContain(zh['setup.gerritUrlUnset'])
+  expect(text()).toContain(zh['setup.gerritUserUnset'])
   // Nothing runs while setup waits, so the dashboard does not claim work in motion.
   expect(document.querySelector('.dt-live')?.getAttribute('data-state')).not.toBe('running')
-  await click(zh['tab.execution'])
+  await openPage(zh, 'execution')
   expect(text()).toContain(zh.executorWaitingSetup)
-  await click(zh['tab.overview'])
+  // The system problems are listed on the pipeline page.
+  await openPage(zh, 'pipeline')
   expect(text()).toContain('在设置 › 来源的 Gerrit 卡片修正后保存，会重新检查')
   await click(find(zh.problemSetup, 'button, a, [role="button"]'))
   expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['term.source'])
-  expect(all('.dt-card')[2]!.textContent).toContain('部署检查未通过：Gerrit 来源没有设置地址。')
+  expect(all('.dt-card')[2]!.textContent).toContain('部署检查未通过：Gerrit 来源没有设置账号。')
   expect(scroll.mock.contexts).toContain(all('.dt-card')[2])
   delete (Element.prototype as Partial<Element>).scrollIntoView
   await click(find(zh['settingsGroup.deployment'], '.dt-settings-link'))
-  expect(text()).toContain('部署检查未通过：Gerrit 来源没有设置地址。')
+  expect(text()).toContain('部署检查未通过：Gerrit 来源没有设置账号。')
   // After a fix outside dsh-superagent, a check runs setup again.
   await click(zh.setupCheck)
   expect(server.requests.filter(request => request.path === 'setup/check')).toEqual([{ path: 'setup/check', method: 'POST' }])
   expect(text()).toContain(zh.setupChecking)
   server.setup = { ...server.setup, problem: problemOf('noSourceConfigured') }
   await remount()
-  await click(zh['tab.overview'])
+  await openPage(zh, 'pipeline')
   await click(find(zh.problemSetup, 'button, a, [role="button"]'))
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['settingsGroup.deployment'])
   expect(text()).toContain('部署检查未通过：没有配置任何来源。至少配置 Redmine 或 Gerrit 之一。')
@@ -167,6 +169,7 @@ it('shows a failed Feishu bot check as a problem of the Feishu Source only, with
   server.setup = { ...server.setup, feishuProblem: problemOf('feishuBotNotReady', { app: 'cli_bot', status: 'missing' }),
     accounts: { ...server.setup.accounts!, feishu: null } }
   await mount()
+  await openPage(zh, 'pipeline')
   expect(text()).toContain(zh.problemSetupFeishu)
   expect(text()).not.toContain('飞书 来源异常')
   await click(find(zh.problemSetupFeishu, 'button, a, [role="button"]'))
@@ -178,7 +181,7 @@ it('shows a failed Feishu bot check as a problem of the Feishu Source only, with
   expect(server.requests.some(request => request.path === 'setup/check')).toBe(false)
   await click(zh.confirm)
   expect(server.requests.some(request => request.path === 'setup/check')).toBe(true)
-  await click(tab(zh['tab.source']))
+  await openPage(zh, 'source')
   // The Source's state carries the problem once, not again as its health.
   expect(all('.dt-form > .dt-list > .dt-row')[0]!.textContent?.match(/cli_bot 的机器人身份状态是 missing/g)).toHaveLength(1)
 })
@@ -196,7 +199,7 @@ it('leaves Feishu out of a Redmine-and-Gerrit deployment', async () => {
 it('shows the Sources waiting for the deployment check, and the problem on the Source that fixes it, with its link', async () => {
   server.setup = { ...server.setup, problem: problemOf('redmineUrlUnset'), accounts: null }
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   const rows = all('.dt-form > .dt-list > .dt-row')
   // The Redmine Source is where the problem is fixed, so it shows the error; the other Sources wait.
   expect(rows.map(row => row.querySelector('.dt-status-text')?.textContent)).toEqual(['等待部署检查', '出错', '等待部署检查'])
@@ -210,7 +213,7 @@ it('shows a Source\'s health in the interface language, and a diagnostic as repo
   server.health = { redmine: { state: 'error', detail: '3 consecutive failed polls; last: EOF', code: 'pollFailures', values: { count: '3',
     error: 'EOF' } } }
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   const redmine = all('.dt-form > .dt-list > .dt-row').find(row => row.querySelector('.dt-row-name')?.textContent === 'Redmine')!
   expect(redmine.textContent).toContain('Redmine 来源：连续 3 次轮询失败，最近一次：EOF')
   expect(redmine.textContent).not.toContain('consecutive')
@@ -220,7 +223,7 @@ it('shows a Source\'s health in the interface language, and a diagnostic as repo
 
 it('shows a refused Source save with the output of the tool that failed on its own line', async () => {
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   const feishu = all('.dt-card')[0]!
   await type(field<HTMLInputElement>('机器人的 lark-cli'), 'lark-broken')
@@ -249,7 +252,7 @@ it('lists the messages a Source did not send in the last day under it, newest fi
     droppedReply('m2', 3, 'feishu', 'channelIgnored'), droppedReply('m1', 4, 'feishu', 'channelGone', { thread: false }),
     droppedReply('m0', 30, 'feishu', 'channelGone'), droppedReply('g0', 2, 'redmine', 'channelGone')]
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   const [feishu, redmine] = all('.dt-form > .dt-list > .dt-row')
   const disclosure = (scope: Element) =>
     [...scope.querySelectorAll<HTMLElement>('[data-disclosure-row]')].find(row => row.textContent?.includes(zh.sourceDroppedTitle))!
@@ -260,9 +263,9 @@ it('lists the messages a Source did not send in the last day under it, newest fi
     ['Reply m2', zh['reason.channelIgnored'], zh['term.thread']], ['Reply m1', zh['reason.channelGone'], undefined]])
   expect(redmine!.textContent).toContain(`${zh.sourceDroppedTitle} 1`)
   await click(find('修复回归', '.dt-disclosure-body button'))
-  expect(tab(zh['tab.execution']).getAttribute('aria-selected')).toBe('true')
+  expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
   await remount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   await click(disclosure(document.body))
   // A Feishu Channel names its chat; the link opens the Thread of the message it answers, which the host found.
   await click(find(zh['term.thread'], '.dt-disclosure-body button'))
@@ -272,7 +275,7 @@ it('lists the messages a Source did not send in the last day under it, newest fi
 
 it('takes no space for messages that were all sent', async () => {
   await mount()
-  await click(zh['tab.source'])
+  await openPage(zh, 'source')
   expect(text()).not.toContain(zh.sourceDroppedTitle)
 })
 

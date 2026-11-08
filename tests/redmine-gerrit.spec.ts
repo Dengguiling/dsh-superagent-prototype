@@ -55,8 +55,8 @@ function harness(gerritAccount = testGerrit, gerritConfig: Record<string, unknow
   const store = new Store(join(directory, 'db.sqlite'))
   store.saveSettings(SettingsSchema.parse({
     policy: { sources: { redmine: { allowed: [{ id: ALICE }] }, gerrit: { allowed: [{ id: 'bob' }] } } }, eval: { mode: 'auto' },
-    sources: { redmine: { enabled: true, config: { baseUrl: BASE, apiKey: 'key', login: 'agent', project: 'demo' } },
-      gerrit: { enabled: true, config: { httpUrl: HTTP, project: 'demo', user: 'agent', password: 'secret', branch: 'main', ...gerritConfig } } },
+    sources: { redmine: { enabled: true, config: { baseUrl: BASE, apiKey: 'key' } },
+      gerrit: { enabled: true, config: { httpUrl: HTTP, project: 'demo', user: 'agent', password: 'secret', ...gerritConfig } } },
   }))
   const board = new HealthBoard()
   const sources = new SourceRegistry(() => store.settings(), board)
@@ -161,8 +161,8 @@ describe('the loop of a corporate installation', () => {
     // The prepare command clones the repository the issue's project names, since no project is configured.
     const values = Object.fromEntries(ticketEnvironment({ deployment: h.parts.deployment, sources: h.parts.sources, settings: h.store.settings(),
       ticket: h.store.tickets.get('ticket-1')!, trigger: h.store.triggers.get('trigger-1') }).map(variable => [variable.key, variable.value]))
-    expect(values).toMatchObject({ DSH_SUPERAGENT_GERRIT_PROJECT: 'sdk', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://agent@gerrit.test:29418/sdk',
-      DSH_SUPERAGENT_GERRIT_PUSH_REF: 'refs/for/main', DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: '' })
+    expect(values).toMatchObject({ DSH_SUPERAGENT_GERRIT_PROJECT: 'sdk', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://gerrit.test:29418/sdk',
+      DSH_SUPERAGENT_GERRIT_BRANCH: '', DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: '' })
     h.store.close()
   })
 })

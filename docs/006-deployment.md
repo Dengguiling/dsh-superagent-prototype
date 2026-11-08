@@ -9,7 +9,7 @@ Use this guide to install, configure and operate dsh-superagent. It covers accou
 - **An agent Gerrit account.** The agent clones the ticket's repository, pushes patches for review and answers reviewers as this account, through an SSH key and an HTTP password. In the local environment it is the developer's account as well, `dev`.
 - **Optional:** a Feishu bot for chat requests.
 
-Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the accounts, Policy for allowed lists, and Execution for worker directories and commands.
+Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the accounts, Policy for what may start work on each Source, and Execution for worker directories and commands.
 
 ### Permissions and isolation
 
@@ -221,7 +221,7 @@ Agents may rely on these routes and fields. The other routes in `src/app/api.ts`
 | `PUT settings/<block>` with `{"value": …, "revision": n}` | Saves one block: `saved`, the block's new `revision`, `policy_changed` and `restarting`. `value` is the whole block, as `GET settings` holds it; a missing key takes its default |
 | `POST executor/pause` with `{"paused": true}` or `false` | Pauses or resumes processing: `paused` |
 | `POST setup/check` | Runs setup again by restarting dsh-superagent: `restarting: true`. Refused when setup has nothing to fix |
-| `POST policy-sync/<source id>` | Syncs that Source's allowed list now: `policy`, the Source's part as saved |
+| `POST policy-sync/<source id>` | Syncs that Source's list of senders now (Feishu): `policy`, the Source's part as saved |
 | `GET prompts`, `PUT prompts` with `{"config", "baseRevision"}` | Reads the prompt configuration: `current`, with its `revision` and `config`, `defaults`, `sections`, the team sections in the order Sessions read them, `skillName`, the pattern of a team skill's name, `builtin`, the names a team skill cannot take, and `skillPrefix`, which Sessions load a skill's name under. Or saves it: the new `revision` |
 | `POST tickets/<id>/retry`, `POST tickets/<id>/stop` | Retries or stops a Ticket, as the panel does |
 
@@ -246,8 +246,8 @@ A refusal has a status and `error`, its English text:
 
 The blocks:
 
-- `source:redmine`, `source:gerrit`, `source:feishu`: `{"enabled": true, "config": {…}}`. Redmine's config has `baseUrl`, `apiKey`, `login` (the bound account; empty uses the account of the API key) and `project` (an optional filter; empty reads every project the account sees), and the switches `observeIssues` and `observeJournals`, off by default, which receive every new issue and every journal that does not mention the agent; Gerrit's has `httpUrl`, `sshUrl`, `project` (an optional single-repository override; empty tracks every repository), `user`, `password`, `keyPath`, `email` and `branch`, and the switches `observeComments` and `observeMessages`, off by default; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
-- `policy`: `{"rules": […], "sources": {"redmine": {"allowed": [{"id": "Alice Smith"}]}, "gerrit": {"allowed": [{"id": "bob"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, by `issue` or `journal` for Redmine, and by `comment` or `message` for Gerrit; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
+- `source:redmine`, `source:gerrit`, `source:feishu`: `{"enabled": true, "config": {…}}`. Redmine's config has `baseUrl` and `apiKey` — the account the key belongs to is read from the task system itself, and the Source reads every project that account can see — and the switches `observeIssues` and `observeJournals`, off by default, which receive every new issue and every journal that does not mention the agent; Gerrit's has `httpUrl`, `project` (an optional single-repository override; empty tracks every repository), `user`, `email`, `keyPath` and `password`, and the switches `observeComments` and `observeMessages`, off by default. The SSH address the agent pushes to follows from `httpUrl` (`ssh://<host>:29418`), the branch it pushes to is the branch of the change the ticket works on, and the HTTP credential the review comments are read with comes from `DSH_SUPERAGENT_GERRIT_TOKEN` in the environment, with the stored `password` as the fallback; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
+- `policy`: `{"rules": […], "sources": {"redmine": {"admission": {"issue": {"unlistedUnaddressed": "inferred"}}}, "gerrit": {"admission": {}}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. Redmine and Gerrit keep no sender list — they admit by relation, so their parts hold only `admission`, and an `allowed` key sent to them is dropped as retired. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, by `issue` or `journal` for Redmine, and by `comment` or `message` for Gerrit; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
 - `eval`: `mode`, `timeoutSeconds` and `model`.
 - `executor`: `model`, `maxWorkers`, `directory`, `prepare` and `blockedCommands`. The processing pause is a setting of its own, `paused`, which `POST executor/pause` sets.
 
@@ -275,7 +275,7 @@ A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write s
 
 ## Try it
 
-From an account on the allowed list, open an issue in the task system that mentions the bound account (`@<login> <request>`) or assign it to the bound account. Within a polling interval (30 seconds by default), Overview should show a Ticket and the workbench should list the task. The agent acknowledges the request, works in its own Session and directory, and writes the result back as a note on the issue. For Feishu, mention the bot in a configured chat.
+From any account, open an issue in the task system that mentions the bound account (`@<login> <request>`) or assign it to the bound account. Within a polling interval (30 seconds by default), Overview should show a Ticket and the workbench should list the task. The agent acknowledges the request, works in its own Session and directory, and writes the result back as a note on the issue. For Feishu, a person on its list mentions the bot in a configured chat.
 
 In the local environment, the sign-in page opens the task system as the leader or as the developer with one click, and the leader's issue, assigned to the developer, is the request that starts the work.
 
@@ -326,4 +326,4 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | `dsh-superagent configuration has keys it does not use` (log) | Remove the named keys; the message says where each value lives now |
 | The log says the plugin is incompatible with the running dsh | Install a DeepSeek Harness version within the `engines.dsh` range |
 | The panel shows "Failed to load plugins" after a DeepSeek Harness upgrade | Restart the running instance |
-| Nothing happens after a mention | Check that the author is on the Source's allowed list, the Source is on, and processing is not paused. In Redmine, a mention added by editing an issue's description is not received as a new trigger; write a new note instead |
+| Nothing happens after a mention | Check that the message truly addresses the agent — in Feishu, that its author is on the Source's list — that the Source is on, and that processing is not paused. In Redmine, a mention added by editing an issue's description is not received as a new trigger; write a new note instead |

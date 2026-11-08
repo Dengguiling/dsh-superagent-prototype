@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Superagent 面板改造原型 · v2</title>
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   Superagent 面板改造原型
+   设计约束：面板运行在 DeepSeek Harness 宿主内，配色由宿主的 --dsw-alias-* 令牌决定，
+   因此本次改造走「结构 + 排版 + 层级」路线，不另起一套调色板。
+   尺度收敛：字号 5 档（12/14/16/20/28），圆角 4 档（4/8/12/999），状态词 5 个。
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --bg-base:#ffffff; --bg-layer-1:#fafafb; --bg-layer-2:#f3f3f5; --bg-module:#eeeef1;
+  --label-1:#17171a; --label-2:#4a4a52; --label-3:#71717a; --label-4:#9a9aa3;
+  --border-2:#ececef; --border-3:#e2e2e7; --border-4:#d2d2d8;
+  --brand:#2f6feb; --brand-soft:rgba(47,111,235,.10);
+  --success:#0f9d58; --warn:#b8770a; --error:#d43c3c; --idle:#a1a1aa; --business:#6b4ee0;
+  --shadow-1:0 1px 2px rgba(16,16,20,.06); --shadow-2:0 12px 32px rgba(16,16,20,.14);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+html[data-theme="dark"] {
+  --bg-base:#0e0e10; --bg-layer-1:#161618; --bg-layer-2:#1d1d20; --bg-module:#242428;
+  --label-1:#eceef1; --label-2:#b6b6be; --label-3:#81818b; --label-4:#5e5e67;
+  --border-2:#24242a; --border-3:#303037; --border-4:#3e3e46;
+  --brand:#5b8dfb; --brand-soft:rgba(91,141,251,.16);
+  --success:#2fc27e; --warn:#e0a02a; --error:#f0655f; --idle:#5f5f68; --business:#9b83f0;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4); --shadow-2:0 16px 40px rgba(0,0,0,.55);
+}
+* { box-sizing:border-box; }
+html,body { height:100%; margin:0; }
+body { font-family:var(--font); font-size:14px; line-height:1.55; color:var(--label-1);
+  background:var(--bg-base); -webkit-font-smoothing:antialiased; }
+button { font:inherit; color:inherit; }
+
+/* ── 宿主外壳（模拟 DSH 侧栏） ─────────────────────────────────────────── */
+.shell { display:grid; grid-template-columns:56px 1fr; height:100vh; }
+.host-rail { background:var(--bg-layer-1); border-right:.5px solid var(--border-3); display:flex;
+  flex-direction:column; align-items:center; gap:6px; padding:12px 0; }
+.host-rail .logo { width:28px; height:28px; border-radius:8px; background:var(--label-1); opacity:.9;
+  margin-bottom:10px; }
+.host-rail .ico { width:28px; height:28px; border-radius:8px; display:grid; place-items:center;
+  color:var(--label-3); }
+.host-rail .ico.on { background:var(--bg-module); color:var(--label-1); }
+.host-rail .spacer { flex:1; }
+
+/* ── 面板 ──────────────────────────────────────────────────────────────── */
+.panel { display:flex; flex-direction:column; min-width:0; height:100vh; overflow:hidden; }
+
+/* 信号栏：常驻，回答「它在跑吗 / 要我做什么 / 我能不能停」 */
+.rail { display:flex; align-items:center; gap:14px; padding:0 20px; height:46px; flex:none;
+  border-bottom:.5px solid var(--border-3); background:var(--bg-base); }
+.rail .brand { font-size:14px; font-weight:650; letter-spacing:.2px; margin-right:2px; }
+.rail .state { display:flex; align-items:center; gap:7px; font-size:13px; color:var(--label-2); }
+.rail .state b { font-weight:600; color:var(--label-1); }
+.dot { width:7px; height:7px; border-radius:50%; background:var(--idle); flex:none; }
+.dot.run { background:var(--success); box-shadow:0 0 0 3px rgba(47,194,126,.16); }
+.dot.warn { background:var(--warn); }
+.dot.err  { background:var(--error); }
+.rail .sep { width:.5px; height:18px; background:var(--border-3); flex:none; }
+.metric { display:flex; align-items:baseline; gap:6px; font-size:12px; color:var(--label-3); }
+.metric b { font-size:14px; font-weight:650; color:var(--label-1); font-variant-numeric:tabular-nums; }
+.metric.need b { color:var(--warn); }
+.rail .grow { flex:1; }
+.slots { display:flex; gap:3px; align-items:center; }
+.slot { width:14px; height:4px; border-radius:2px; background:var(--border-4); }
+.slot.on { background:var(--success); }
+
+.iconbtn { width:30px; height:30px; border-radius:8px; border:.5px solid transparent; background:transparent;
+  color:var(--label-3); display:grid; place-items:center; cursor:pointer; font-size:14px; }
+.iconbtn:hover { background:var(--bg-layer-2); color:var(--label-1); }
+.iconbtn.on { border-color:var(--border-4); color:var(--label-1); }
+
+.btn { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:8px;
+  border:.5px solid var(--border-4); background:transparent; color:var(--label-1); font-size:13px;
+  cursor:pointer; white-space:nowrap; }
+.btn:hover { background:var(--bg-layer-2); }
+.btn.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+.btn.primary:hover { filter:brightness(1.08); }
+.btn.ghost { border-color:transparent; color:var(--label-2); }
+.btn.danger { color:var(--error); border-color:transparent; }
+.btn.danger:hover { background:rgba(244,101,95,.10); }
+.btn.sm { height:26px; padding:0 9px; font-size:12px; }
+
+/* 导航：3 个顶层区，带角标 */
+.nav { display:flex; align-items:center; gap:2px; padding:0 20px; height:42px; flex:none;
+  border-bottom:.5px solid var(--border-3); background:var(--bg-base); }
+.nav .tab { height:42px; padding:0 12px; border:0; background:transparent; color:var(--label-3);
+  font-size:14px; cursor:pointer; position:relative; display:flex; align-items:center; gap:7px; }
+.nav .tab:hover { color:var(--label-1); }
+.nav .tab[aria-selected="true"] { color:var(--label-1); font-weight:600; }
+.nav .tab[aria-selected="true"]::after { content:''; position:absolute; left:12px; right:12px; bottom:-.5px;
+  height:2px; background:var(--label-1); border-radius:2px 2px 0 0; }
+.nav .badge { min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:var(--warn);
+  color:#fff; font-size:11px; font-weight:600; display:inline-grid; place-items:center; font-variant-numeric:tabular-nums; }
+.nav .badge.quiet { background:var(--bg-module); color:var(--label-3); }
+.nav .grow { flex:1; }
+.searchbtn { display:flex; align-items:center; gap:8px; height:30px; padding:0 8px 0 10px; border-radius:8px;
+  border:.5px solid var(--border-3); background:var(--bg-layer-1); color:var(--label-4); font-size:13px;
+  cursor:pointer; min-width:210px; }
+.searchbtn:hover { border-color:var(--border-4); color:var(--label-3); }
+.searchbtn kbd { margin-left:auto; font-family:var(--font); font-size:11px; color:var(--label-4);
+  border:.5px solid var(--border-3); border-radius:4px; padding:1px 5px; }
+
+/* 屏幕 */
+.screen { flex:1; min-height:0; display:none; overflow:hidden; }
+.screen.on { display:flex; }
+.canvas { flex:1; min-width:0; overflow:auto; padding:22px 24px 32px; }
+.wrap { max-width:1180px; margin:0 auto; }
+
+.pagehead { display:flex; align-items:baseline; gap:12px; margin-bottom:18px; }
+.pagehead h1 { margin:0; font-size:20px; line-height:28px; font-weight:650; letter-spacing:-.1px; }
+.pagehead p { margin:0; font-size:13px; color:var(--label-3); }
+.pagehead .grow { flex:1; }
+
+/* ── 任务工作台：列表 + 详情 + 常驻输入框 ─────────────────────────── */
+.inboxcol { flex:1; min-width:0; display:flex; flex-direction:column; gap:14px; }
+.inboxcol .subtabs { margin-bottom:0; }
+.inbox { display:grid; grid-template-columns:minmax(340px,400px) minmax(0,1fr); gap:20px;
+  align-items:stretch; height:100%; }
+.inboxcol .inbox { flex:1; min-height:0; height:auto; }
+.backlink { display:none; align-items:center; gap:4px; border:0; background:none; color:var(--label-2);
+  font:inherit; font-size:13px; cursor:pointer; padding:0 0 10px; }
+.backlink:hover { color:var(--label-1); }
+.inbox-list { display:flex; flex-direction:column; min-height:0; min-width:0; }
+.filters { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:12px; flex:none; }
+.filters .f { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px; border-radius:999px;
+  border:.5px solid transparent; background:transparent; color:var(--label-2); font-size:12px; cursor:pointer; }
+.filters .f:hover { background:var(--bg-layer-2); }
+.filters .f[aria-pressed="true"] { background:var(--bg-module); color:var(--label-1); font-weight:600; }
+.filters .f b { font-variant-numeric:tabular-nums; font-weight:600; color:var(--label-3); }
+.filters .f[aria-pressed="true"] b { color:var(--label-1); }
+.filters .f.hot[aria-pressed="true"] { background:rgba(224,160,42,.16); color:var(--warn); }
+.filters .f.hot b { color:var(--warn); }
+
+.rows { overflow:auto; margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:2px; }
+.row { position:relative; display:flex; gap:10px; align-items:flex-start; padding:9px 10px 9px 12px;
+  border-radius:8px; cursor:pointer; border:.5px solid transparent; }
+.row:hover { background:var(--bg-layer-1); }
+.row[aria-current="true"] { background:var(--bg-layer-1); border-color:var(--border-3); }
+.row .bar { position:absolute; left:0; top:8px; bottom:8px; width:2px; border-radius:2px; background:var(--warn); }
+.row .grow { min-width:0; flex:1; display:flex; flex-direction:column; gap:3px; }
+.row .t { font-size:13px; line-height:19px; font-weight:500; color:var(--label-1);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.row .m { display:flex; align-items:center; gap:8px; font-size:12px; line-height:16px; color:var(--label-4); flex-wrap:wrap; }
+.row .m .id { font-family:var(--mono); font-size:11px; color:var(--label-3); }
+.row .st { flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;
+  padding:2px 7px; border-radius:4px; white-space:nowrap; }
+.st.need { color:var(--warn); background:rgba(224,160,42,.14); }
+.st.work { color:var(--business); background:rgba(155,131,240,.14); }
+.st.done { color:var(--success); background:rgba(47,194,126,.14); }
+.st.idle { color:var(--label-3); background:var(--bg-module); }
+.st.err  { color:var(--error); background:rgba(244,101,95,.14); }
+
+/* 详情 */
+.detail { display:flex; flex-direction:column; min-height:0; border:.5px solid var(--border-3);
+  border-radius:12px; background:var(--bg-layer-1); overflow:hidden; }
+.detail-head { padding:16px 18px 14px; border-bottom:.5px solid var(--border-3); flex:none; }
+.detail-head h2 { margin:0 0 6px; font-size:16px; line-height:24px; font-weight:650; }
+.detail-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--label-3); }
+.detail-meta .id { font-family:var(--mono); font-size:11px; }
+.detail-actions { display:flex; align-items:center; gap:6px; margin-top:14px; }
+.detail-actions .grow { flex:1; }
+
+.banner { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 18px 4px; padding:9px 12px;
+  border-radius:8px; background:var(--bg-module); font-size:13px; }
+.banner .k { font-weight:650; color:var(--warn); }
+
+.chat { flex:1; min-height:0; overflow:auto; padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
+.msg { display:flex; flex-direction:column; gap:4px; max-width:78%; }
+.msg.mine { align-self:flex-end; align-items:flex-end; }
+.chat .who { display:flex; align-items:baseline; gap:8px; font-size:12px; color:var(--label-4); }
+.chat .who b { font-size:13px; font-weight:600; color:var(--label-2); }
+.chat .who .ag { color:var(--business); }
+.bubble { border-radius:8px; background:var(--bg-base); border:.5px solid var(--border-3); padding:10px 12px;
+  font-size:13px; line-height:21px; color:var(--label-2); }
+.bubble h4 { margin:0 0 6px; font-size:13px; font-weight:600; color:var(--label-1); }
+.bubble p { margin:0 0 8px; }
+.bubble p:last-child { margin:0; }
+.bubble code { font-family:var(--mono); font-size:12px; background:var(--bg-module); padding:1px 4px; border-radius:4px; }
+.bubble pre { margin:0; font-family:var(--mono); font-size:12px; line-height:19px; color:var(--label-2);
+  white-space:pre-wrap; overflow-wrap:anywhere; }
+.bubble.mine { background:var(--brand-soft); border-color:transparent; }
+
+/* 常驻输入框：面板的主要动作，不能被长对话推到屏幕外 */
+.composer { flex:none; border-top:.5px solid var(--border-3); padding:10px 12px 12px; background:var(--bg-base); }
+.composer .ta { width:100%; min-height:56px; resize:none; border:.5px solid var(--border-4); border-radius:8px;
+  background:var(--bg-layer-1); color:var(--label-1); font:inherit; font-size:13px; line-height:20px; padding:8px 10px; }
+.composer .ta:focus { outline:2px solid var(--brand); outline-offset:1px; }
+.composer .foot { display:flex; align-items:center; gap:10px; margin-top:8px; }
+.composer .hint { font-size:12px; color:var(--label-4); margin-right:auto; }
+
+/* ── 流水线 ───────────────────────────────────────────────────────────── */
+.subtabs { display:flex; gap:2px; margin-bottom:16px; border-bottom:.5px solid var(--border-3); }
+.subtabs .s { padding:7px 12px 9px; border:0; background:transparent; color:var(--label-3); font-size:13px;
+  cursor:pointer; position:relative; }
+.subtabs .s:hover { color:var(--label-1); }
+.subtabs .s[aria-selected="true"] { color:var(--label-1); font-weight:600; }
+.subtabs .s[aria-selected="true"]::after { content:''; position:absolute; left:8px; right:8px; bottom:-.5px; height:2px;
+  background:var(--label-1); border-radius:2px 2px 0 0; }
+
+.card { border:.5px solid var(--border-3); border-radius:12px; background:var(--bg-layer-1); padding:16px 18px; }
+.card + .card { margin-top:14px; }
+.card h3 { margin:0 0 3px; font-size:16px; font-weight:650; display:flex; align-items:center; gap:8px; }
+.card .sub { margin:0; font-size:12px; color:var(--label-3); }
+
+/* 诚实的工位图：每个工位写清「统计什么」「什么时间窗」，不做可比的柱状图 */
+.flow { display:flex; align-items:stretch; margin-top:16px; }
+.station { flex:1 1 0; min-width:0; padding:11px 12px 12px; border-radius:8px; border:.5px solid transparent;
+  cursor:pointer; background:transparent; text-align:left; }
+.station:hover { background:var(--bg-layer-2); }
+.station.need { background:rgba(224,160,42,.10); border-color:rgba(224,160,42,.28); }
+.station .lab { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--label-3); }
+.station .n { display:block; font-size:20px; line-height:28px; font-weight:650; font-variant-numeric:tabular-nums;
+  color:var(--label-1); margin-top:1px; }
+.station.need .n { color:var(--warn); }
+.station .u { display:block; font-size:12px; line-height:17px; color:var(--label-4); white-space:nowrap; }
+.station .u em { font-style:normal; color:var(--label-3); }
+.station .w { display:block; font-size:12px; line-height:17px; color:var(--label-4); white-space:nowrap; }
+.arrow { flex:0 0 22px; align-self:center; text-align:center; color:var(--label-4); font-size:13px; }
+.honest { margin:14px 0 0; padding:9px 12px; border-radius:8px; background:var(--bg-module);
+  font-size:12px; color:var(--label-3); display:flex; gap:8px; align-items:flex-start; }
+
+.legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--label-3); }
+.legend span { display:inline-flex; align-items:center; gap:6px; }
+
+/* 来源健康度 */
+.srcs { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin-top:14px; }
+.src { border:.5px solid var(--border-3); border-radius:8px; background:var(--bg-base); padding:12px 14px; }
+.src .h { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.src .h b { font-size:13px; font-weight:600; }
+.src .h .grow { flex:1; }
+.src .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:12px; color:var(--label-3); }
+.src .kv dd { margin:0; color:var(--label-2); font-family:var(--mono); font-size:11px; overflow-wrap:anywhere; }
+
+/* ── 设置 ─────────────────────────────────────────────────────────────── */
+.settings { display:grid; grid-template-columns:168px minmax(0,1fr); gap:26px; align-items:start; }
+.setnav { display:flex; flex-direction:column; gap:1px; position:sticky; top:0; }
+.setnav .n { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:0 9px;
+  border:0; border-radius:8px; background:transparent; color:var(--label-2); font-size:13px; cursor:pointer; text-align:left; }
+.setnav .n:hover { background:var(--bg-layer-2); }
+.setnav .n[aria-current="page"] { background:var(--bg-module); color:var(--label-1); font-weight:600; }
+.setnav .n .chg { width:6px; height:6px; border-radius:50%; background:var(--brand); }
+.setbody { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.field { display:flex; flex-direction:column; gap:5px; font-size:13px; max-width:460px; }
+.field .lab { color:var(--label-2); }
+.field .hint { font-size:12px; color:var(--label-4); }
+.input { height:30px; border:.5px solid var(--border-4); border-radius:8px; background:var(--bg-layer-1);
+  color:var(--label-1); font:inherit; font-size:13px; padding:0 9px; width:100%; }
+.input:focus { outline:2px solid var(--brand); outline-offset:1px; }
+.savebar { position:sticky; bottom:-32px; display:flex; align-items:center; gap:10px; padding:11px 14px;
+  border:.5px solid var(--border-4); border-radius:8px; background:var(--bg-base); box-shadow:var(--shadow-1); }
+.savebar .grow { flex:1; }
+.savebar .hint { font-size:12px; color:var(--label-3); }
+
+/* ── 命令面板 ─────────────────────────────────────────────────────────── */
+.scrim { position:fixed; inset:0; background:rgba(0,0,0,.45); backdrop-filter:blur(2px); display:none;
+  align-items:flex-start; justify-content:center; padding-top:12vh; z-index:50; }
+.scrim.on { display:flex; }
+.palette { width:min(600px,92vw); background:var(--bg-layer-2); border:.5px solid var(--border-4);
+  border-radius:12px; box-shadow:var(--shadow-2); overflow:hidden; }
+.palette .in { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:.5px solid var(--border-3); }
+.palette .in input { flex:1; border:0; background:transparent; outline:none; color:var(--label-1);
+  font:inherit; font-size:15px; }
+.palette .group { padding:8px 8px 4px; font-size:11px; color:var(--label-4); }
+.palette .res { display:flex; align-items:center; gap:10px; padding:7px 12px; border-radius:8px; cursor:pointer;
+  font-size:13px; }
+.palette .res:hover, .palette .res.on { background:var(--bg-module); }
+.palette .res .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.palette .res .k { font-size:11px; color:var(--label-4); font-family:var(--mono); }
+.palette .res mark { background:rgba(224,160,42,.28); color:inherit; border-radius:2px; }
+
+/* ── 标注（可选，用来讲改造点） ──────────────────────────────────────── */
+.notes { display:none; margin-bottom:16px; border:.5px solid var(--border-4); border-radius:8px;
+  background:var(--brand-soft); padding:10px 14px; font-size:12px; color:var(--label-2); }
+body.annotate .notes { display:block; }
+body.annotate .notes b { color:var(--label-1); }
+.notes ul { margin:6px 0 0; padding-left:18px; }
+
+.float { position:fixed; right:16px; bottom:16px; display:flex; gap:6px; z-index:60; }
+.float .btn { box-shadow:var(--shadow-2); background:var(--bg-layer-2); }
+.prototype-note { position:fixed; left:72px; bottom:16px; margin:0; max-width:460px; padding:8px 12px; border:.5px solid var(--border-3); border-radius:8px; background:var(--bg-layer-2); font-size:12px; line-height:18px; color:var(--label-3); z-index:60; }
+.prototype-note b { color:var(--label-1); }
+.prototype-note code { font-family:var(--mono); font-size:11px; }
+
+@media (max-width: 980px) {
+  .inbox { grid-template-columns:minmax(0,1fr); }
+  .inbox-list { display:none; }
+  .inbox.listmode .inbox-list { display:flex; }
+  .inbox.listmode .detail { display:none; }
+  .backlink { display:inline-flex; }
+  .settings { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- 宿主侧栏（示意） -->
+  <div class="host-rail">
+    <div class="logo"></div>
+    <div class="ico">＋</div>
+    <div class="ico">⌘</div>
+    <div class="ico on">⌗</div>
+    <div class="ico">◷</div>
+    <div class="ico">▦</div>
+    <div class="ico">⌕</div>
+    <div class="spacer"></div>
+    <div class="ico">◍</div>
+  </div>
+
+  <!-- 面板 -->
+  <div class="panel">
+
+    <!-- ① 信号栏：常驻，回答三个问题 -->
+    <div class="rail">
+      <div class="brand">Superagent</div>
+      <div class="state"><span class="dot run"></span><b>运行中</b><span>· Redmine 已连接</span></div>
+      <div class="sep"></div>
+      <div class="metric need"><b>1</b><span>等你处理</span></div>
+      <div class="metric"><b>2</b><span>排队</span></div>
+      <div class="sep"></div>
+      <div class="metric"><span>工作槽</span>
+        <span class="slots"><i class="slot on"></i><i class="slot on"></i><i class="slot"></i><i class="slot"></i></span>
+        <b>2</b><span>/ 4</span></div>
+      <div class="grow"></div>
+      <button class="btn sm" title="暂停处理">⏸ 暂停处理</button>
+      <button class="iconbtn" title="打开主 Session">▣</button>
+    </div>
+
+    <!-- ② 导航：3 个顶层区 + 角标 + 搜索 -->
+    <div class="nav">
+      <button class="tab" data-screen="inbox" aria-selected="true">任务工作台<span class="badge">1</span></button>
+      <button class="tab" data-screen="pipe" aria-selected="false">流水线</button>
+      <button class="tab" data-screen="settings" aria-selected="false">设置</button>
+      <div class="grow"></div>
+      <button class="searchbtn" id="openPalette">⌕ 搜索工单、任务、触发…<kbd>⌘K</kbd></button>
+      <button class="iconbtn" title="术语表">?</button>
+    </div>
+
+    <!-- ③ 屏幕 -->
+    <section class="screen on" id="inbox">
+      <div class="inboxcol">
+      <div class="inbox" id="inboxGrid">
+        <!-- 左：队列 -->
+        <div class="inbox-list">
+          <div class="filters" role="group" aria-label="筛选">
+            <button class="f hot" aria-pressed="true">等你处理<b>1</b></button>
+            <button class="f" aria-pressed="false">处理中<b>2</b></button>
+            <button class="f" aria-pressed="false">未处理<b>1</b></button>
+            <button class="f" aria-pressed="false">已归档<b>0</b></button>
+          </div>
+          <ul class="rows">
+            <li class="row" aria-current="true"><span class="bar"></span>
+              <div class="grow">
+                <div class="t">Paginator drops the last page of a collection whose size is not a multiple of the page size</div>
+                <div class="m"><span class="id">#8</span><span>sdk</span><span>New</span><span>Zhang Wei</span><span>3 分钟前</span></div>
+              </div>
+              <span class="st need">等你</span></li>
+            <li class="row"><div class="grow">
+              <div class="t">RetryPolicy retries 400/404 responses</div>
+              <div class="m"><span class="id">#9</span><span>sdk</span><span>New</span><span>22 分钟前</span></div>
+            </div><span class="st need">等你</span></li>
+            <li class="row"><div class="grow">
+              <div class="t">CLI --timeout option is ignored</div>
+              <div class="m"><span class="id">#11</span><span>sdk-cli</span><span>New</span><span>19 分钟前</span></div>
+            </div><span class="st need">等你</span></li>
+            <li class="row"><div class="grow">
+              <div class="t">TokenStore does not refresh token before expiry</div>
+              <div class="m"><span class="id">#10</span><span>sdk</span><span>New</span><span>16 分钟前</span></div>
+            </div><span class="st need">等你</span></li>
+            <li class="row"><div class="grow">
+              <div class="t">Access token is not refreshed before it expires: requests fail with 401 near the expiry time</div>
+              <div class="m"><span class="id">#10</span><span>sdk</span><span>New</span><span>7 分钟前</span></div>
+            </div><span class="st work">执行中</span></li>
+            <li class="row"><div class="grow">
+              <div class="t">fix-retry-client-errors after the third attempt</div>
+              <div class="m"><span class="id">#12</span><span>GraphiX</span><span>New</span><span>12 分钟前</span></div>
+            </div><span class="st idle">等回复</span></li>
+            <li class="row"><div class="grow">
+              <div class="t">add-readme-greeting to the SDK quickstart</div>
+              <div class="m"><span class="id">#13</span><span>sdk</span><span>New</span><span>31 分钟前</span></div>
+            </div><span class="st idle">已拒绝</span></li>
+          </ul>
+        </div>
+
+        <!-- 右：详情 + 常驻输入框 -->
+        <div class="detail">
+          <button class="backlink" id="backToList">‹ 返回列表</button>
+          <div class="detail-head">
+            <h2>Paginator drops the last page of a collection whose size is not a multiple of the page size</h2>
+            <div class="detail-meta">
+              <span class="id">#8</span><span>sdk</span><span>状态 New</span><span>负责人 Zhang Wei</span><span>3 分钟前</span>
+            </div>
+            <div class="detail-actions">
+              <button class="btn">↗ 在 Redmine 打开</button>
+              <button class="btn ghost">归档</button>
+              <div class="grow"></div>
+              <button class="btn danger">删除</button>
+            </div>
+          </div>
+
+          <div class="banner">
+            <span class="k">等你处理</span>
+            <span>工单 · Fix paginate() dropping the last partial page</span>
+            <span>Gerrit 变更 #8 · NEW</span>
+            <div class="grow" style="flex:1"></div>
+            <button class="btn sm">打开 Gerrit</button>
+            <button class="btn sm">打开 Session</button>
+          </div>
+
+          <div class="chat">
+            <div class="msg">
+              <div class="who"><b>Li Na</b><span>33 分钟前</span></div>
+              <div class="bubble">
+                <h4>Symptoms</h4>
+                <p>Iterating a collection with <code>Client.paginate()</code> silently stops after the full pages; the last, partial page is never requested. For a collection of 250 items with a page size of 100 only 200 items come back and no error is raised.</p>
+                <h4>Steps to reproduce</h4>
+                <pre># items = list(client.paginate("/projects", page_size=100))
+# request `GET /projects?page=1&per_page=100` manually and compare
+# the `total` field with `len(items)`</pre>
+                <h4>Expected</h4>
+                <p>Every page is requested: 250 items come back as 100 + 100 + 50.</p>
+                <h4>Actual</h4>
+                <p>Only two pages are requested and 200 items come back; the last 50 items are dropped without a warning.</p>
+              </div>
+            </div>
+            <div class="msg">
+              <div class="who"><b class="ag">Superagent</b><span>21 分钟前</span><a class="btn ghost sm" href="#" style="margin-left:auto">↗ 在 Redmine 查看</a></div>
+              <div class="bubble">
+                <h4>已定位并修复</h4>
+                <p>根因在 <code>Paginator._fetch_page</code>：只有当返回条数 <em>等于</em> page_size 时才继续翻页，最后一页不足时被当成越界丢弃。已改为按 <code>total</code> 判断是否还有下一页，并补上 <code>tests/test_known_bugs.py::test_paginator_returns_the_partial_last_page</code>。</p>
+                <p>补丁已提交到 Gerrit 变更 #8（NEW），等待你验收。</p>
+              </div>
+            </div>
+            <div class="msg mine">
+              <div class="who"><b>Zhang Wei</b><span>6 分钟前</span></div>
+              <div class="bubble mine">边界那页也请补一个 250 条的用例，另外 total 字段缺失时不要静默截断。</div>
+            </div>
+          </div>
+
+          <!-- 常驻输入框 -->
+          <div class="composer">
+            <textarea class="ta" placeholder="回复到 #8 的任务单…"></textarea>
+            <div class="foot">
+              <span class="hint">发送后会立刻交给代理，代理会接着做。</span>
+              <button class="btn primary">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <section class="screen" id="pipe">
+      <div class="canvas">
+        <div class="wrap">
+          <div class="pagehead">
+            <h1>流水线</h1>
+            <p>来源 → 触发 → 评估 → 执行，四段各有各的记录。</p>
+          </div>
+
+          <div class="notes">
+            <b>改造点</b>
+            <ul>
+              <li>工位图去掉「按最大工位归一化」的柱条：任务数、触发数、工单数口径不同，比长度只会骗人。每个工位写清「统计什么 + 什么时间窗」。</li>
+              <li>「执行中」原本统计的是 Executor 的<b>工作进程数</b>，却链向<b>工单</b>列表——数与列表对不上。改为统计工单数，进程负载移到信号栏的「工作槽」。</li>
+              <li>「等人」是唯一需要人动手的工位，给它唯一的暖色底，其余工位保持安静。</li>
+            </ul>
+          </div>
+
+          <div class="subtabs" role="tablist">
+            <button class="s" role="tab" aria-selected="true">流程</button>
+            <button class="s" role="tab" aria-selected="false">来源</button>
+            <button class="s" role="tab" aria-selected="false">触发</button>
+            <button class="s" role="tab" aria-selected="false">评估</button>
+            <button class="s" role="tab" aria-selected="false">执行</button>
+          </div>
+
+          <div class="card">
+            <h3>工位<span class="legend" style="margin-left:auto">
+              <span><i class="dot run"></i>进行中</span><span><i class="dot warn"></i>等人</span><span><i class="dot" style="background:var(--success);opacity:.55"></i>已完成</span>
+            </span></h3>
+            <p class="sub">点工位进入对应列表。</p>
+
+            <div class="flow">
+              <button class="station"><span class="lab"><i class="dot"></i>任务</span><span class="n">4</span><span class="u"><em>Redmine 任务单</em></span><span class="w">未归档</span></button>
+              <div class="arrow">›</div>
+              <button class="station"><span class="lab"><i class="dot run"></i>触发</span><span class="n">13</span><span class="u"><em>触发消息</em></span><span class="w">过去 24 小时</span></button>
+              <div class="arrow">›</div>
+              <button class="station"><span class="lab"><i class="dot"></i>评估</span><span class="n">0</span><span class="u"><em>评估中的会话</em></span><span class="w">此刻</span></button>
+              <div class="arrow">›</div>
+              <button class="station"><span class="lab"><i class="dot"></i>工单</span><span class="n">5</span><span class="u"><em>工单</em></span><span class="w">未结束</span></button>
+              <div class="arrow">›</div>
+              <button class="station"><span class="lab"><i class="dot run"></i>执行中</span><span class="n">2</span><span class="u"><em>工单</em></span><span class="w">代理正在做</span></button>
+              <div class="arrow">›</div>
+              <button class="station need"><span class="lab"><i class="dot warn"></i>等人</span><span class="n">4</span><span class="u"><em>工单</em></span><span class="w">需要你处理</span></button>
+              <div class="arrow">›</div>
+              <button class="station"><span class="lab"><i class="dot" style="background:var(--success);opacity:.55"></i>完成</span><span class="n">2</span><span class="u"><em>工单</em></span><span class="w">过去 24 小时</span></button>
+            </div>
+
+            <p class="honest"><span>ⓘ</span><span>各工位统计的对象和时间窗不同（任务单 / 触发 / 评估 / 工单），数字之间<strong>不可直接比较</strong>；「等你处理 1」与任务箱里「等你处理」筛选是同一批任务单。</span></p>
+          </div>
+
+          <div class="srcs">
+            <div class="src">
+              <div class="h"><span class="dot run"></span><b>Redmine</b><span class="grow"></span><span class="st done">正常</span></div>
+              <dl class="kv"><dt>账号</dt><dd>188*******99</dd><dt>地址</dt><dd>redmine.corp.local</dd><dt>轮询</dt><dd>30 s</dd></dl>
+            </div>
+            <div class="src">
+              <div class="h"><span class="dot run"></span><b>Gerrit</b><span class="grow"></span><span class="st done">正常</span></div>
+              <dl class="kv"><dt>账号</dt><dd>superagent-bot</dd><dt>地址</dt><dd>gerrit.corp.local:8080</dd><dt>跟踪</dt><dd>按 Issue 提交尾注</dd></dl>
+            </div>
+            <div class="src">
+              <div class="h"><span class="dot warn"></span><b>飞书</b><span class="grow"></span><span class="st need">已暂停</span></div>
+              <dl class="kv"><dt>原因</dt><dd>机器人检查未通过</dd><dt>影响</dt><dd>仅该来源暂停</dd></dl>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen" id="settings">
+      <div class="canvas">
+        <div class="wrap">
+          <div class="pagehead"><h1>设置</h1><p>来源、策略、执行、提示词、部署。</p></div>
+          <div class="settings">
+            <nav class="setnav">
+              <button class="n" aria-current="page">来源</button>
+              <button class="n">策略与评估</button>
+              <button class="n">执行</button>
+              <button class="n">提示词<span class="chg"></span></button>
+              <button class="n">部署</button>
+            </nav>
+            <div class="setbody">
+              <div class="card">
+                <h3>Redmine<span class="st done" style="margin-left:auto">已连接</span></h3>
+                <p class="sub">绑定你的账号，代理接手分派给你的任务单。</p>
+                <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+                  <label class="field"><span class="lab">账号</span><input class="input" value="188*******99" readonly></label>
+                  <label class="field"><span class="lab">服务地址</span><input class="input" value="https://redmine.corp.local"><span class="hint">使用 API key 登录，密码不会保存在面板里。</span></label>
+                  <label class="field"><span class="lab">轮询间隔</span><input class="input" value="30 秒"><span class="hint">越小越及时，也越频繁地打扰 Redmine。</span></label>
+                </div>
+                <div class="savebar">
+                  <span class="hint">2 处改动未保存</span>
+                  <div class="grow"></div>
+                  <button class="btn ghost">放弃改动</button>
+                  <button class="btn primary">保存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- 命令面板 -->
+<div class="scrim" id="scrim">
+  <div class="palette" role="dialog" aria-label="搜索">
+    <div class="in"><span>⌕</span><input id="q" placeholder="搜索工单、任务单、触发，或输入命令…"><kbd style="font-size:11px;color:var(--label-4)">esc</kbd></div>
+    <div id="pres">
+      <div class="group">等你处理 · 4</div>
+      <div class="res on"><span class="t">Paginator drops the last page of a <mark>collection</mark> whose size…</span><span class="k">#8 · 工单</span></div>
+      <div class="res"><span class="t"><mark>RetryPolicy</mark> retries 400/404 responses</span><span class="k">#9 · 工单</span></div>
+      <div class="group">命令</div>
+      <div class="res"><span class="t">暂停处理</span><span class="k">命令</span></div>
+      <div class="res"><span class="t">打开来源设置</span><span class="k">命令</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="float">
+  <button class="btn sm" id="toggleTheme">☀︎ 浅色</button>
+  <button class="btn sm" id="toggleAnnotate">标注</button>
+</div>
+
+<p class="prototype-note">
+  <b>原型说明</b>：这里画的就是已经落地的形态——信号栏、诚实的工位图、常驻输入框、加宽的队列列，以及
+  <b>任务工作台 / 流水线 / 设置</b>三个去处（去处下面是自己的页面）。见 <code>design/redesign-plan.md</code> §4.5。
+</p>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+function show(id) {
+  $$('.nav .tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.screen === id)));
+  $$('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+}
+
+$$('.nav .tab').forEach(tab => tab.addEventListener('click', () => show(tab.dataset.screen)));
+
+$$('.rows .row').forEach(row => row.addEventListener('click', () => {
+  $$('.rows .row').forEach(r => r.removeAttribute('aria-current'));
+  row.setAttribute('aria-current', 'true');
+}));
+
+$$('.filters .f').forEach(f => f.addEventListener('click', () => {
+  $$('.filters .f').forEach(x => x.setAttribute('aria-pressed', String(x === f)));
+}));
+
+$$('.subtabs .s').forEach(s => s.addEventListener('click', () => {
+  $$('.subtabs .s').forEach(x => x.setAttribute('aria-selected', String(x === s)));
+}));
+
+const scrim = $('#scrim');
+$('#openPalette').addEventListener('click', () => { scrim.classList.add('on'); $('#q').focus(); });
+scrim.addEventListener('click', e => { if (e.target === scrim) scrim.classList.remove('on'); });
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); scrim.classList.add('on'); $('#q').focus(); }
+  if (e.key === 'Escape') scrim.classList.remove('on');
+});
+
+$('#toggleTheme').addEventListener('click', e => {
+  const html = document.documentElement;
+  const dark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', dark ? 'light' : 'dark');
+  e.target.textContent = dark ? '☾︎ 深色' : '☀︎ 浅色';
+});
+$('#toggleAnnotate').addEventListener('click', () => document.body.classList.toggle('annotate'));
+
+$('#backToList').addEventListener('click', () => {
+  const grid = $('#inboxGrid');
+  grid.classList.add('listmode');
+  grid.querySelectorAll('.row').forEach(r => r.removeAttribute('aria-current'));
+});
+$$('.rows .row').forEach(row => row.addEventListener('click', () => {
+  if (window.innerWidth <= 980) $('#inboxGrid').classList.remove('listmode');
+}));
+
+// Deep links: #pipe, #settings, #light — used for screenshots and review links.
+(function applyHash() {
+  const hash = location.hash.slice(1);
+  if (!hash) return;
+  const [screen, theme] = hash.split(':');
+  if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  if (screen && document.getElementById(screen)) show(screen);
+  if (hash.includes('annotate')) document.body.classList.add('annotate');
+})();
+</script>
+</body>
+</html>

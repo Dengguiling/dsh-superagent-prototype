@@ -3,7 +3,9 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 
 const dir = join(process.cwd(), 'src/client')
-const css = readFileSync(join(dir, 'client.css'), 'utf8')
+// Every stylesheet of the panel is held to the same rules, not only the main one.
+const sheets = readdirSync(dir).filter(name => name.endsWith('.css')).sort()
+const css = sheets.map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 const code = readdirSync(dir).filter(name => /\.tsx?$/.test(name)).map(name => readFileSync(join(dir, name), 'utf8')).join('\n')
 
 it('styles only classes a component uses', () => {

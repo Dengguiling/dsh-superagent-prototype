@@ -20,6 +20,7 @@ import { redmineChannel } from '../../src/sources/redmine-trigger.ts'
 import { feishuKind } from '../../src/sources/feishu.ts'
 import { gerritKind } from '../../src/sources/gerrit.ts'
 import { redmineKind } from '../../src/sources/redmine.ts'
+import { SourceRegistry } from '../../src/sources/registry.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
 import { testDeployment } from './deployment.ts'
@@ -139,8 +140,8 @@ function sourceSettings(): SourceView[] {
     const { admission: _admission, ...part } = server.settings.policy.sources[kind.kind] ?? { allowed: [], admission: {} }
     const sync = kind.policy?.sync && { label: kind.policy.sync.label, ready: kind.policy.sync.ready(kind.policy.schema.parse(part)),
       health: server.health[`sync:${kind.kind}`] }
-    const policy = kind.policy && { fields: kind.policy.fields, explicit: kind.policy.explicit, ...kind.policy.rows
-      ? { rows: kind.policy.rows(config) } : {}, ...sync ? { sync } : {} }
+    const policy = kind.policy && { fields: kind.policy.fields, explicit: kind.policy.explicit, ...kind.policy.relation ? { relation: true } : {},
+      ...kind.policy.rows ? { rows: kind.policy.rows(config) } : {}, ...sync ? { sync } : {} }
     return { id: kind.kind, kind: kind.kind, title: kind.title, description: kind.description, installed: true,
       value: { enabled: server.settings.sources[kind.kind]?.enabled ?? true, config },
         revision: server.revisions[`source:${kind.kind}`] ?? 0,
@@ -187,6 +188,7 @@ const overviewView = (): ApiResponse<'GET overview'> => {
   const { problem, feishuProblem } = server.setup
   const setup = problem ?? feishuProblem
   return {
+    paused: server.settings.paused,
     problems: [...setup ? [{ kind: 'setup' as const, ...setup }] : [],
       ...KINDS.some(kind => server.settings.sources[kind.kind]?.enabled !== false) ? [] : [{ kind: 'no-source' as const }],
       ...feishuProblem || server.settings.sources.feishu?.enabled === false ? [] : [{ kind: 'source-error' as const, source: { id: 'feishu',
@@ -200,7 +202,9 @@ const overviewView = (): ApiResponse<'GET overview'> => {
       ...Object.entries(server.health).filter(([name, item]) => item.state === 'error' && !KINDS.some(kind => kind.health.includes(name))
         && !name.startsWith('sync:') && name !== 'evals')
         .map(([name, item]) => ({ kind: 'runtime-error' as const, name, detail: item.detail })),
-      ...Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
+      // A relation Source originates work without a list; only when none is enabled and every list is empty is there a problem.
+      ...KINDS.some(kind => kind.policy?.relation && server.settings.sources[kind.kind]?.enabled !== false)
+        || Object.values(server.settings.policy.sources).some(part => part.allowed.length) ? [] : [{ kind: 'no-allowed' as const }],
       ...server.failing.map(outgoing => ({ kind: 'outgoing' as const, outgoing }))],
     person: server.person, executor: { running: 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers, idle: 1 },
     flow: { received: 12, filtered: 2, triggers: 10, judged: 5, accepted: 1, evaluating: 0,
@@ -218,6 +222,11 @@ const PMS_TASKS = [
   pmsTask({ id: 13, subject: 'CLI --timeout is ignored', status: 'In Progress', priority: 'High', assignee: 'Software Developer', author: 'Team Leader',
     project: 'sdk-cli', updated: '2026-11-05T10:00:00Z', url: 'http://redmine.test/issues/13', state: 'undecided' }),
 ]
+/** A task whose ticket waits for a person: it stays in the inbox, in the 等你处理 filter only. */
+const PMS_WAITING = [pmsTask({ id: 15, subject: 'Access token is not refreshed before it expires', status: 'New', priority: 'High',
+  assignee: 'Software Developer', author: 'Team Leader', project: 'sdk', updated: '2026-11-05T11:30:00Z',
+  url: 'http://redmine.test/issues/15', state: 'waiting',
+  ticket: { id: 'ticket-3', title: 'Refresh the token before it expires', stage: 'person', change: 1004, session: 'worker-ticket-3' } })]
 /** A task the route did not take: it stays in the inbox, in the declined filter only. */
 const PMS_DECLINED = [pmsTask({ id: 14, subject: 'Document the migration guide', status: 'New', priority: 'Low', assignee: 'Software Developer',
   author: 'Someone Else', project: 'sdk', updated: '2026-11-05T11:00:00Z', url: 'http://redmine.test/issues/14', state: 'declined',
@@ -230,10 +239,10 @@ const PMS_SOURCE = (): ApiResponse<'GET pms'>['source'] => ({ name: 'demo', url:
   connected: !(server as PanelServer | undefined)?.setup.problem })
 /** The default Workbench view: the operator's tasks, one archived, and work in every pipeline station but idle. */
 const pmsView = (): ApiResponse<'GET pms'> => ({
-  tasks: PMS_TASKS.map(task => ({ ...task })),
+  tasks: [...PMS_TASKS, ...PMS_WAITING].map(task => ({ ...task })),
   declined: PMS_DECLINED.map(task => ({ ...task })),
   archived: PMS_ARCHIVED.map(task => ({ ...task })),
-  pipeline: { tasks: 2, taken: 1, arrived: 5, evaluating: 1, tickets: 3, queued: 1, waiting: 1, idle: 0, ended: 2 },
+  pipeline: { tasks: 2, taken: 1, arrived: 5, sources: 2, threads: 2, evaluating: 1, tickets: 3, working: 1, queued: 1, waiting: 1, idle: 0, ended: 2 },
   executor: { running: 1, max: 4, paused: false },
   source: PMS_SOURCE(),
   updatedAt: '2026-11-05T10:00:00Z',
@@ -291,9 +300,9 @@ function initial(): PanelServer {
       rules: [{ id: 'copy', name: '文案修改', enabled: true, instruction: '修正明确的文案错误' }] },
     sources: { feishu: { enabled: true, config: { cli: 'lark-bot', chats: [{ chatId: 'oc_team', listen: 'mentions' }],
       directMessages: true } },
-      redmine: { enabled: true, config: { baseUrl: 'http://redmine.test', apiKey: 'key', login: 'alice', project: 'demo' } },
-      gerrit: { enabled: true, config: { httpUrl: 'http://gerrit.test:8080', sshUrl: 'ssh://agent@gerrit.test:29418', project: 'widgets',
-        user: 'agent-bot', password: '', keyPath: '', email: 'agent@example.test', branch: 'main' } } },
+      redmine: { enabled: true, config: { baseUrl: 'http://redmine.test', apiKey: 'key' } },
+      gerrit: { enabled: true, config: { httpUrl: 'http://gerrit.test:8080', project: 'widgets',
+        user: 'agent-bot', password: '', keyPath: '', email: 'agent@example.test' } } },
     executor: { blockedCommands: ['gh-personal'] },
   })
   const ended = ticketSummary({ id: 't0', title: '旧工单', state: 'ended', actions: { retry: false, stop: false },
@@ -305,7 +314,7 @@ function initial(): PanelServer {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
-        name: 'Widgets Bot' }, redmine: { login: 'alice', project: 'demo' }, gerrit: { user: 'agent-bot', project: 'widgets' } } },
+        name: 'Widgets Bot' }, redmine: { login: 'alice' }, gerrit: { user: 'agent-bot', project: 'widgets' } } },
     settings, revisions: { policy: 3, eval: 1, executor: 0 },
     prompts: { masterId: 'master', sections: TEAM_SECTIONS, skillName: SKILL_NAME.source, builtin: ['feishu', 'redmine', 'gerrit'],
       skillPrefix: SKILL_PREFIX, revision: 0, current: { ...defaults, config: defaultPrompts() },
@@ -416,11 +425,18 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   } },
   'POST triggers/:id/requeue': { answer: ({ params }) => { server.queued.add(params.id); return { queued: true } } },
   'GET decisions': { query: ['kind', 'window', 'offset', 'limit'], answer: ({ query }) =>
-    ({ items: query.kind === 'ignore' ? [] : [acceptDecision()], next_offset: null }) },
+    ({ items: query.kind === 'ignore' ? [] : [acceptDecision()], next_offset: null, total: query.kind === 'ignore' ? 0 : 1 }) },
   'POST decisions/:id/dismiss': { answer: ({ params }) => params.id === 'u1' ? { dismissed: true } : refuse(404,
     'Unavailable Eval not found') },
-  'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
-    : 'open']) },
+  'GET tickets': { query: ['state', 'window', 'offset', 'limit'], answer: ({ query }) => {
+    const list = server.tickets[query.state === 'ended' ? 'ended' : 'open']
+    // The window narrows the ended tickets to the ones of the last day, as the server does.
+    const since = query.window ? Date.now() - 86_400_000 : 0
+    const filtered = since ? list.filter(ticket => Date.parse(ticket.updatedAt) >= since) : list
+    // The server pages the list and says how many it holds in all.
+    const limit = Number(query.limit ?? 20)
+    return { items: filtered.slice(0, limit), total: filtered.length, next_offset: filtered.length > limit ? limit : null }
+  } },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)
@@ -444,7 +460,13 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
       : refuse(400, 'Invalid settings: block')
     if (body.revision !== (server.revisions[block] ?? 0)) return refuse(409, 'Settings changed. Reload before saving.')
     let restarting = false
-    if (block === 'policy') server.settings = { ...server.settings, policy: PolicyConfigSchema.parse(body.value) }
+    if (block === 'policy') {
+      // As on the server, each installed kind validates its part, so a retired key such as a relation Source's list is dropped.
+      const parsed = PolicyConfigSchema.parse(body.value)
+      const registry = new SourceRegistry(() => server.settings)
+      for (const kind of KINDS) registry.register(kind)
+      server.settings = { ...server.settings, policy: { ...parsed, sources: registry.validatePolicy(parsed.sources) as typeof parsed.sources } }
+    }
     else if (block === 'executor') server.settings = { ...server.settings, executor: ExecutorConfigSchema.parse(body.value) }
     else if (block === 'eval') server.settings = { ...server.settings, eval: EvalConfigSchema.parse(body.value) }
     else if (source) {

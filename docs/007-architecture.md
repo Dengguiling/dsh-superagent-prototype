@@ -126,7 +126,7 @@ A Mandate's `basis` (`MandateBasis`) records how the gate admitted its Trigger. 
 
 | `via` | Admission basis |
 | --- | --- |
-| `addressed` | An allowed sender addressed the agent |
+| `addressed` | Someone addressed the agent: on a relation Source anyone, on a listed Source an allowed sender |
 | `followup` | A message arrived on a Thread with Tickets |
 | `admission` | An admission-table cell; `observation` marks an inferred candidate |
 | `bot` | A listed bot produced an inferred candidate |
@@ -183,6 +183,8 @@ Each kind has a health entry under its name. It reports an error once one of its
 ### Sources
 
 Sources extend the host through `SourceKind`, defined in `src/sources/kind.ts`. A kind declares its identity, title, description, configuration `schema` and `fields`, derived `facts`, and `health` entries. Optional behavior includes `scope`, a `channel` (`allowed`, `send`, `link`), `threadContext`, `find`, `policy`, `environment` and `refreshLabels`.
+
+A kind's `policy` (`SourcePolicyPart`) declares how its senders may originate work: `relation` marks a kind that keeps no sender list, where whatever addresses the agent is an explicit request from anyone (Redmine, Gerrit); a kind without it keeps the `allowed` list in its part (`schema` and `fields`), as Feishu does with its roster sync. Every `scope` result of a relation kind carries `relation: true`, which the Policy gate and Mandate revalidation read to skip the list checks.
 
 `SourceRegistry` (`registry.ts`) owns registered kinds and stored instances, and implements the Engine's `SourceScope`. Registration claims health entries on `HealthBoard`; duplicate claims and reserved `sync:` names are refused. A SourceContext writes only through its registration's claimed entries, so reports after unregistration do nothing.
 
@@ -381,13 +383,15 @@ Some generic modules still refer directly to one Source:
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
 | `src/client/pms.tsx` | The workbench page: the task inbox, its 待处理 and 已归档 lists, and the conversation about the opened task |
 | `src/client/conversation.tsx` | The conversation of a workbench task: its header and Ticket line, the issue's description and journals with their authors, the local archive and delete actions, and the reply box |
-| `src/client/dashboard.tsx` | The live dashboard of Overview: the status banner, the worker slots and the pipeline chart, built from the PMS view |
+| `src/client/pipeline-page.tsx` | The pipeline page: its stations, each counting the work it holds, and the system problems below the chart |
+| `src/client/rail.tsx` | The signal rail above every page: the live state, the work that needs a person, the Executor's load and the switch that stops it |
 | `src/client/pipeline.tsx` | The pipeline chart of the dashboard: one station per stage, its count and light, and the flow between them |
-| `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
-| `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
+| `src/client/app.tsx` | The panel: header, search, glossary, the group tabs, the tabs of the current group and the page of the current route |
+| `src/client/palette.tsx`, `palette.css` | The command palette: the destinations of the panel and the actions an operator reaches for, and its styles |
+| `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, the snapshot of the system the rail and the Overview share, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
-| `src/client/route.ts` | The tabs, the first Overview, the settings groups, the typed routes that `parseRoute` reads — among them a workbench task and its filter — and the route memory with the settings group opened last |
-| `src/client/overview.tsx` | Overview, the first page: the live dashboard, then the Tickets needing action and the problems |
+| `src/client/route.ts` | The three groups of the panel and the pages of each, the settings groups, the typed routes that `parseRoute` reads — among them a workbench task and its filter — and the route memory with the settings group opened last |
+| `src/client/problems.tsx` | The system problems, each with the step that fixes it; the pipeline page shows them below the chart |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
@@ -449,8 +453,9 @@ Some generic modules still refer directly to one Source:
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
-| `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx`, `panel-pms.spec.tsx` | Each page of the panel — among them Overview's live dashboard and the workbench task inbox with its conversation — against a fake management API answered by route |
+| `tests/panel-pipeline.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx`, `panel-pms.spec.tsx` | Each page of the panel — among them the Inbox with what needs a person and the workbench task inbox with its conversation — against a fake management API answered by route |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
+| `tests/panel-palette.spec.tsx` | The command palette: opening it with the keyboard, filtering it, running a command and closing it |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |
 | `tests/locales.spec.ts`, `tests/styles.spec.ts` | The copy in both languages, the stylesheet |
 | `tests/class-docs.spec.ts` | Every class in `src` has a JSDoc block before it |
@@ -547,7 +552,7 @@ The worker preset is defined in `cordis.patch.yml` and selected through `WORKER_
 
 Routing results use `{decision?, reason, ticket?}`. `orchestrator_route` returns `{results}`, preserving item order and adding each item's `trigger_id` and `kind`. Invalid or refused items return `refused` and a reason without stopping the batch.
 
-Settings and prompt saves return the saved configuration. Policy sync returns the Source, allowed-list size, and `added` and `removed` names.
+Settings and prompt saves return the saved configuration. Policy sync returns the Source, the synced list's size, and `added` and `removed` names.
 
 `orchestrator_eval` returns context rather than instructions. Assessment instructions live in `runtime/admission` (`prompts/admission.md`), and rules in `runtime/policy`. Its context includes:
 

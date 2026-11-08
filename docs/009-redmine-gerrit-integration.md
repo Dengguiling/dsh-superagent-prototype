@@ -655,7 +655,7 @@ In the company the operator cannot create a separate agent account, so the Sourc
 - A note carrying `<!-- dsh-superagent-panel:<token> -->` is a reply the operator posted from the workbench, which was delivered to the agent immediately as a human Trigger; the polling Source skips it too.
 - Every other journal on an issue the agent works is human input, whatever account wrote it — including the operator's own note written in the Redmine web UI, which is how the operator continues the task without mentioning the agent.
 
-The markers are a convention, not a security boundary: anyone who can write a note could copy one. The Policy's allowed list still decides whose journals may start work.
+The markers are a convention, not a security boundary: anyone who can write a note could copy one. The Policy still decides what a journal means — a journal that reassigns the issue to the agent or mentions it is an explicit request from whoever wrote it, and the admission table governs the rest.
 
 ## A.10 Detecting “addressed to the agent”
 

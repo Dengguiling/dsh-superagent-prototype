@@ -16,7 +16,6 @@ export const SETUP_PROBLEMS = {
   redmineApiKeyRefused: ['redmine', 'Redmine refused the API key of {url}.'],
   redmineUnreadable: ['redmine', 'Redmine at {url} did not answer.'],
   redmineNoAccount: ['redmine', 'Redmine at {url} did not report the account of the API key.'],
-  gerritUrlUnset: ['gerrit', 'The Gerrit Source names no address.'],
   gerritUserUnset: ['gerrit', 'The Gerrit Source names no account.'],
   gerritCredentialsRefused: ['gerrit', 'Gerrit refused the account of {url}.'],
   gerritUnreadable: ['gerrit', 'Gerrit at {url} did not answer.'],

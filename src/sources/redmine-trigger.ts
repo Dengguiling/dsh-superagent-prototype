@@ -66,6 +66,12 @@ export const mentions = (text: string, login: string): boolean =>
   !!login && new RegExp(`(?:^|[^a-zA-Z0-9_@])@${escapeRegExp(login)}(?![a-zA-Z0-9_-])`, 'i').test(text)
 /** True when the issue is assigned to the agent account, which the API reports by the account's id. */
 export const assignedTo = (issue: RedmineIssue, agentId: number): boolean => !!agentId && issue.assigned_to?.id === agentId
+/**
+ * True when a journal reassigns the issue to the agent account, which Redmine records as an `assigned_to_id` attribute
+ * change carrying the account's id as the new value.
+ */
+export const assignsTo = (journal: RedmineJournal, agentId: number): boolean => !!agentId && (journal.details ?? []).some(detail =>
+  (detail.name === 'assigned_to_id' || detail.name === 'assigned_to') && String(detail.new_value ?? '') === String(agentId))
 /** The field changes of a journal, as text; Redmine records them beside the note. */
 export const detailsText = (journal: RedmineJournal): string =>
   (journal.details ?? []).map(detail => {
@@ -140,8 +146,9 @@ export function journalTrigger(issue: RedmineIssue, journal: RedmineJournal, age
   return { id: key('redmine-journal', String(journal.id)), source: SOURCE,
     threads: [{ source: SOURCE, id: String(issue.id) }],
     actor: { source: SOURCE, id: actorOf(author) }, human: true,
-    ...(panel && assignedTo(issue, agent.id) ? { addressed: 'direct' as const }
-      : mentions(text, agent.login) ? { addressed: 'mention' as const } : {}),
+    // A journal that reassigns the issue to the agent speaks to it as directly as the operator's panel note does.
+    ...(panel && assignedTo(issue, agent.id)) || assignsTo(journal, agent.id) ? { addressed: 'direct' as const }
+      : mentions(text, agent.login) ? { addressed: 'mention' as const } : {},
     at: journal.created_on ?? journal.updated_on ?? issue.updated_on ?? new Date().toISOString(), text,
     channel: redmineChannel(issue.id), url: redmineJournalPage(baseUrl, issue.id, journal.id),
     meta: { ...issueMeta(issue, project), kind: 'journal', journalId: journal.id } }

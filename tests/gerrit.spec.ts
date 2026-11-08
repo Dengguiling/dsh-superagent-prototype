@@ -53,7 +53,7 @@ function host(overrides: Partial<SourceContextDeps> = {}, gerritConfig: Record<s
   const store = new Store(join(directory, 'db.sqlite'))
   store.saveSettings(SettingsSchema.parse({
     policy: { sources: { gerrit: { allowed: [{ id: 'bob', name: 'Bob' }] } } }, eval: { mode: 'auto' },
-    sources: { gerrit: { enabled: true, config: { httpUrl: HTTP, sshUrl: 'ssh://agent@gerrit.test:29418', project: 'demo', user: AGENT, password: 'secret', ...gerritConfig } } },
+    sources: { gerrit: { enabled: true, config: { httpUrl: HTTP, project: 'demo', user: AGENT, password: 'secret', ...gerritConfig } } },
   }))
   const board = new HealthBoard()
   const sources = new SourceRegistry(() => store.settings(), board)
@@ -113,6 +113,13 @@ describe('the Gerrit translation', () => {
     expect(commentTrigger(change(), comment('Ic1', { author: { name: AGENT } }), AGENT, HTTP)).toBeUndefined()
     const robot = commentTrigger(change(), comment('Ic1', { author: { name: 'Gerrit Robot' } }), AGENT, HTTP)!
     expect(robot.human).toBe(false)
+  })
+  it('addresses the agent directly on its own change, whoever writes the comment', () => {
+    expect(commentTrigger(change(), comment('Ic1'), AGENT, HTTP)!.addressed).toBe('direct')
+    expect(commentTrigger(change({ owner: { username: 'bob', name: 'Bob' } }), comment('Ic1'), AGENT, HTTP)!.addressed).toBeUndefined()
+    expect(commentTrigger(change({ owner: null }), comment('Ic1'), AGENT, HTTP)!.addressed).toBeUndefined()
+    // A change message is a status note, never a request, on the agent's own change too.
+    expect(messageTrigger(change(), { id: 'm1', message: 'Change has been merged.', author: { username: 'bob' } }, AGENT, HTTP)!.addressed).toBeUndefined()
   })
   it('carries the change first and the issue it answers second, when the commit message names an issue', () => {
     const review = commentTrigger(change(), comment('Ic1'), AGENT, HTTP, '7')!
@@ -202,26 +209,26 @@ describe('the Gerrit environment', () => {
   /** The environment values of a deployment whose project override is `project`, for an optional Trigger. */
   const environment = (project: string, trigger?: Trigger) => gerritKind.environment!.values({
     deployment: testDeployment({ gerrit: { ...testGerrit, project } }),
-    config: gerritKind.schema.parse({ httpUrl: HTTP, sshUrl: 'ssh://agent@gerrit.test:29418', project, user: AGENT, password: 'secret' }),
+    config: gerritKind.schema.parse({ httpUrl: HTTP, project, user: AGENT, password: 'secret' }),
     ...trigger ? { trigger } : {},
   })
   const issueTrigger = (project: string): Trigger => ({ id: 't1', source: 'redmine', threads: [{ source: 'redmine', id: '7' }],
     actor: { source: 'redmine', id: 'alice' }, human: true, at: '', text: 'Fix', meta: { issueId: 7, project } })
   const patchTrigger = (project: string, changeNumber: number): Trigger => ({ id: 't2', source: SOURCE, threads: [{ source: SOURCE, id: String(changeNumber) }],
-    actor: { source: SOURCE, id: 'bob' }, human: true, at: '', text: 'Fix', meta: { changeNumber, project } })
+    actor: { source: SOURCE, id: 'bob' }, human: true, at: '', text: 'Fix', meta: { changeNumber, project, branch: 'main' } })
   it('names the repository of the ticket: the issue\'s project or the change\'s, for cloning and for the change page', () => {
     // The project is empty: the ticket names its repository, and the variables follow it.
     expect(environment('', issueTrigger('sdk'))).toMatchObject({
-      DSH_SUPERAGENT_GERRIT_PROJECT: 'sdk', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://agent@gerrit.test:29418/sdk',
-      DSH_SUPERAGENT_GERRIT_PUSH_REF: 'refs/for/main', DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: '', DSH_SUPERAGENT_GERRIT_CHANGE_URL: '' })
+      DSH_SUPERAGENT_GERRIT_PROJECT: 'sdk', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://gerrit.test:29418/sdk',
+      DSH_SUPERAGENT_GERRIT_BRANCH: '', DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: '', DSH_SUPERAGENT_GERRIT_CHANGE_URL: '' })
     // A Gerrit Trigger names the change's project, and the change page follows the change, not the issue.
     expect(environment('', patchTrigger('sdk-cli', 12))).toMatchObject({
-      DSH_SUPERAGENT_GERRIT_PROJECT: 'sdk-cli', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://agent@gerrit.test:29418/sdk-cli',
-      DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: '12', DSH_SUPERAGENT_GERRIT_CHANGE_URL: `${HTTP}/#/c/sdk-cli/+/12` })
+      DSH_SUPERAGENT_GERRIT_PROJECT: 'sdk-cli', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://gerrit.test:29418/sdk-cli',
+      DSH_SUPERAGENT_GERRIT_BRANCH: 'main', DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: '12', DSH_SUPERAGENT_GERRIT_CHANGE_URL: `${HTTP}/#/c/sdk-cli/+/12` })
   })
   it('lets the legacy project override name the repository of every ticket', () => {
     expect(environment('demo', issueTrigger('sdk'))).toMatchObject({
-      DSH_SUPERAGENT_GERRIT_PROJECT: 'demo', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://agent@gerrit.test:29418/demo' })
+      DSH_SUPERAGENT_GERRIT_PROJECT: 'demo', DSH_SUPERAGENT_GERRIT_SSH_URL: 'ssh://gerrit.test:29418/demo' })
   })
 })
 
@@ -315,13 +322,17 @@ describe('the Gerrit channel', () => {
 })
 
 describe('the Gerrit Source kind', () => {
-  it('names the people who may originate work, and the rows of its admission table', () => {
+  it('keeps no sender list, admits by relation, and shows the rows of its admission table', () => {
     const policy = gerritKind.policy!
-    expect(policy.schema.parse({}).allowed).toEqual([])
+    expect(policy.relation).toBe(true)
+    expect(policy.fields).toEqual([])
+    expect(policy.schema.parse({ allowed: [{ id: 'lead' }] })).toEqual({})
     const rows = policy.rows!({ httpUrl: HTTP, observeComments: true })
     expect(rows.map(row => row.id)).toEqual(['comment', 'message'])
-    expect(rows[0]!.cells.listedUnaddressed).toBe(true)
+    expect(rows[0]!.cells.unlistedUnaddressed).toBe(true)
+    expect(rows[0]!.cells.listedUnaddressed).toBe(false)
     expect(rows[1]!.cells.listedUnaddressed).toBe(false)
+    expect(rows[1]!.cells.unlistedUnaddressed).toBe(false)
   })
   it('registers the kind, reports that it waits for setup, and unregisters it again', async () => {
     const board = new HealthBoard()

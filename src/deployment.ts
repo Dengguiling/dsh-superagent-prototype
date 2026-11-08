@@ -45,30 +45,29 @@ export function machineOf(config: DeploymentConfig): Machine {
 
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 /**
- * Redmine account fields: the task system's base URL, the API key of the agent's account, the project it reads, and the
- * login the agent posts as. The API key is a credential and never reaches a worker's environment.
+ * Redmine account fields: the task system's base URL and the API key of the agent's account. The account the key belongs
+ * to is read from the task system itself, and the Source watches every project that account can see. The API key is a
+ * credential and never reaches a worker's environment.
  */
 export const RedmineAccountsSchema = z.object({
   baseUrl: z.string().trim().default(''),
   apiKey: z.string().trim().default(''),
-  project: z.string().trim().default(''),
-  login: z.string().trim().default(''),
 })
 /**
- * Gerrit account fields: the HTTP base URL of the review server, the SSH URL the agent pushes patches to, an optional
- * single-repository override, the account's user name, its HTTP password, the private key used for SSH, and the branch
- * patches target.
+ * Gerrit account fields: the HTTP base URL of the review server, an optional single-repository override, the account's
+ * user name, the private key used for SSH, the commit email, and the HTTP credential the review comments are read with.
+ * The SSH address and the branch the patches target are not configured: the address follows the web address, and the
+ * branch belongs to the change a ticket works on.
  */
 export const GerritAccountsSchema = z.object({
   httpUrl: z.string().trim().default(''),
-  sshUrl: z.string().trim().default(''),
   /** Empty tracks the issue-referencing patches of every repository; a name is the legacy single-repository override. */
   project: z.string().trim().default(''),
   user: z.string().trim().default(''),
+  /** The HTTP credential of the account; the environment variable of the same purpose wins over a stored value. */
   password: z.string().trim().default(''),
   keyPath: z.string().trim().default(''),
   email: z.string().trim().default(''),
-  branch: z.string().trim().default('main'),
 })
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
 export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = {
@@ -85,9 +84,9 @@ export interface Deployment extends Machine {
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
 /** The resolved Redmine account: where the task system is, and which account the agent acts as. */
-export interface RedmineAccount { baseUrl: string; apiKey: string; id: number; login: string; name: string; mail: string; project: string }
+export interface RedmineAccount { baseUrl: string; apiKey: string; id: number; login: string; name: string; mail: string }
 /** The resolved Gerrit account: where the review server is over HTTP and SSH, and which account the agent acts as. */
-export interface GerritAccount { httpUrl: string; sshUrl: string; /** Empty tracks every repository; a name is the legacy single-repository override. */ project: string; user: string; password: string; keyPath: string; branch: string; email: string }
+export interface GerritAccount { httpUrl: string; /** Empty tracks every repository; a name is the legacy single-repository override. */ project: string; user: string; password: string; keyPath: string; email: string }
 
 /** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
 export function executable(name: string, path: string, exclude?: string): string {
@@ -164,8 +163,7 @@ export async function resolveRedmine(machine: Machine, redmine: unknown): Promis
   // The account is under the `user` key of the answer.
   const user = parsed(z.object({ user: RedmineUser }), response.body)?.user
   if (!user) throw new SetupError('redmineNoAccount', { url: root })
-  return { baseUrl: root, apiKey: accounts.apiKey, id: user.id, login: user.login, name: displayName(user),
-    mail: user.mail ?? '', project: accounts.project }
+  return { baseUrl: root, apiKey: accounts.apiKey, id: user.id, login: user.login, name: displayName(user), mail: user.mail ?? '' }
 }
 
 const GerritProject = z.object({ id: z.string(), name: z.string() })
@@ -177,10 +175,12 @@ const GerritAccountInfo = z.object({ username: z.string().optional(), email: z.s
  */
 export async function resolveGerrit(machine: Machine, gerrit: unknown): Promise<GerritAccount | undefined> {
   const accounts = GerritAccountsSchema.parse(gerrit ?? {})
-  if (!accounts.httpUrl && !accounts.sshUrl) return undefined
-  if (!accounts.httpUrl) throw new SetupError('gerritUrlUnset')
+  if (!accounts.httpUrl) return undefined
   const root = base(accounts.httpUrl)
-  const headers = { Authorization: basic(accounts.user, accounts.password), 'Content-Type': 'application/json' }
+  // The HTTP credential of the account comes from the environment, where a machine keeps it; a stored value is the
+  // fallback for the deployments that saved one.
+  const password = process.env.DSH_SUPERAGENT_GERRIT_TOKEN || accounts.password
+  const headers = { Authorization: basic(accounts.user, password), 'Content-Type': 'application/json' }
   /** Reads the account behind the configured credentials; its email is the commit identity Gerrit accepts. */
   const self = async () => {
     const response = await http(`${root}/a/accounts/self`, { headers }).catch((error: unknown) => {
@@ -195,8 +195,7 @@ export async function resolveGerrit(machine: Machine, gerrit: unknown): Promise<
   const account = (email: string, project: string, found?: z.infer<typeof GerritAccountInfo>): GerritAccount => {
     const user = found?.username || accounts.user
     if (!user) throw new SetupError('gerritUserUnset')
-    return { httpUrl: root, sshUrl: accounts.sshUrl, project, user, password: accounts.password,
-      keyPath: accounts.keyPath, branch: accounts.branch, email: email || found?.email || '' }
+    return { httpUrl: root, project, user, password, keyPath: accounts.keyPath, email: email || found?.email || '' }
   }
   if (accounts.project) {
     const response = await http(`${root}/a/projects/${encodeURIComponent(accounts.project)}`, { headers }).catch((error: unknown) => {

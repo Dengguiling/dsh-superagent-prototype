@@ -57,12 +57,16 @@ export function storeReads(db: DatabaseSync) {
   },
   recentDecisions: (offset = 0, limit = 50): Decision[] => db.prepare('SELECT value FROM decision ORDER BY rowid DESC LIMIT ? OFFSET ?').all(limit, offset).map(row => JSON.parse(String(row.value)) as Decision),
   /** Decisions matching `kinds` whose triggers arrived at or after `since`, aligned with `flow` window counts. */
-  decisions: (options: { kinds: string[]; since: string }, offset: number, limit: number): { items: Decision[]; more: boolean } => {
+  decisions: (options: { kinds: string[]; since: string }, offset: number, limit: number): { items: Decision[]; more: boolean; total: number } => {
     const where = [...(options.kinds.length ? [`json_extract(d.value, '$.kind') IN (${options.kinds.map(() => '?').join(',')})`] : []),
       ...(options.since ? ["EXISTS (SELECT 1 FROM json_each(json_extract(d.value, '$.triggerIds')) j JOIN trigger t ON t.id = j.value WHERE t.at >= ?)"] : [])]
-    const rows = db.prepare(`SELECT d.value FROM decision d ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.rowid DESC LIMIT ? OFFSET ?`)
+    const filter = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const rows = db.prepare(`SELECT d.value FROM decision d ${filter} ORDER BY d.rowid DESC LIMIT ? OFFSET ?`)
       .all(...options.kinds, ...(options.since ? [options.since] : []), limit + 1, offset)
-    return { items: rows.slice(0, limit).map(row => JSON.parse(String(row.value)) as Decision), more: rows.length > limit }
+    // The total tells the panel how many Decisions the list holds, so a truncated one does not look like all of them.
+    const total = Number(db.prepare(`SELECT COUNT(*) AS n FROM decision d ${filter}`)
+      .get(...options.kinds, ...(options.since ? [options.since] : []))?.n ?? 0)
+    return { items: rows.slice(0, limit).map(row => JSON.parse(String(row.value)) as Decision), more: rows.length > limit, total }
   },
   /** Newest decisions of the given kinds, for surfaces that must surface rare outcomes among many ignores. */
   decisionsOfKinds: (kinds: string[], limit = 30): Decision[] => db.prepare(`SELECT value FROM decision WHERE json_extract(value, '$.kind') IN (${kinds.map(() => '?').join(',')}) ORDER BY rowid DESC LIMIT ?`).all(...kinds, limit).map(row => JSON.parse(String(row.value)) as Decision),

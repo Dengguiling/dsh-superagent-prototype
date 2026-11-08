@@ -409,15 +409,16 @@ it('builds the task inbox from the issues assigned to the bound account, the ope
   expect(view.tasks[1]).toMatchObject({ id: 8, project: 'sdk' })
   expect(view.tasks[1]).not.toHaveProperty('ticket')
   // The pipeline counts the tasks of the inbox, the Triggers of the last day, and the work in the Executor now.
-  expect(view.pipeline).toEqual({ tasks: 2, taken: 1, arrived: 3, evaluating: 1, tickets: 3, queued: 1, waiting: 1, idle: 1, ended: 1 })
+  // The Eval stage holds both the Thread under evaluation and the one whose Trigger waits for the next Eval.
+  expect(view.pipeline).toEqual({ tasks: 2, taken: 1, arrived: 3, sources: 0, threads: 0, evaluating: 2, tickets: 3, working: 1, queued: 1, waiting: 1, idle: 1, ended: 1 })
   expect(view.executor).toEqual({ running: 2, max: 4, paused: false })
-  expect(view.source).toEqual({ name: 'demo', url: 'http://redmine.test', configured: true, connected: true })
+  expect(view.source).toEqual({ name: 'agent', url: 'http://redmine.test', configured: true, connected: true })
   // A task system that does not answer leaves the inbox empty and says why, but the pipeline is still there.
   vi.spyOn(Commands.prototype, 'http').mockRejectedValue(new Error('network down'))
   const down = await pms(store, commands, deployment, 0)
   expect([down.tasks, down.archived]).toEqual([[], []])
-  expect(down.source).toEqual({ name: 'demo', url: 'http://redmine.test', configured: true, connected: false, error: 'network down' })
-  expect(down.pipeline).toEqual({ tasks: 0, taken: 0, arrived: 3, evaluating: 1, tickets: 3, queued: 1, waiting: 1, idle: 1, ended: 1 })
+  expect(down.source).toEqual({ name: 'agent', url: 'http://redmine.test', configured: true, connected: false, error: 'network down' })
+  expect(down.pipeline).toEqual({ tasks: 0, taken: 0, arrived: 3, sources: 0, threads: 0, evaluating: 2, tickets: 3, working: 1, queued: 1, waiting: 1, idle: 1, ended: 1 })
   // An HTTP error is reported like any other failure.
   vi.spyOn(Commands.prototype, 'http').mockResolvedValue({ status: 404, body: '{"errors":["Not found"]}' })
   expect((await pms(store, commands, deployment, 0)).source).toMatchObject({ connected: false, error: expect.stringContaining('404') })
@@ -440,7 +441,7 @@ it('reads a task\'s conversation: the description, then the notes with their mar
   const detail = await pmsTask(store, commands, deployment, 7)
   expect(detail?.task).toMatchObject({ id: 7, project: 'sdk', url: 'http://redmine.test/issues/7' })
   expect(detail?.canReply).toBe(true)
-  expect(detail?.source).toEqual({ name: 'demo', url: 'http://redmine.test', configured: true, connected: true })
+  expect(detail?.source).toEqual({ name: 'agent', url: 'http://redmine.test', configured: true, connected: true })
   expect(detail?.messages.map(message => [message.role, message.name, message.text, message.url])).toEqual([
     ['other', 'Team Leader', 'The login button does nothing.', 'http://redmine.test/issues/7'],
     ['other', 'Team Leader', 'The retry tests need to pass too.', 'http://redmine.test/issues/7#change-11'],

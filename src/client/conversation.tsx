@@ -2,22 +2,26 @@
 import { useState, type FormEvent } from 'react'
 import { Button, Icon } from './controls.tsx'
 import { usePoll, type TaskDetailView, type TaskMessage } from './api.ts'
+import { ticketMark } from './marks.ts'
 import { useAction, usePanel } from './provider.tsx'
 import { errorText, reasonLabel, type T } from './text.ts'
-import { ConfirmButton, Hint, LoadState, When } from './widgets.tsx'
+import { ConfirmButton, Hint, LoadState, MarkdownLite, When } from './widgets.tsx'
 
 /** The author label of one message: the superagent, the operator, or whoever else wrote on the issue. */
 function authorName(t: T, message: TaskMessage): string {
   return message.role === 'agent' ? t('pmsAgent') : message.role === 'you' ? t('pmsYou') : message.name
 }
-/** One message of the conversation: the author, when it was written, its text, and the anchor in Redmine. */
+/**
+ * One message of the conversation: the author, when it was written, and its text. The agent speaks on the left and the
+ * people on the right, the way a chat reads; the task system itself is one link away, in the header.
+ */
 function Message({ message }: { message: TaskMessage }) {
   const { t } = usePanel()
   return <li className="dt-chat-msg" data-role={message.role}>
     <span className="dt-chat-meta"><span className="dt-chat-author">{authorName(t, message)}</span>
       <When at={message.at} /></span>
-    <p className="dt-chat-text">{message.text}</p>
-    <a className="dt-chat-link" href={message.url} target="_blank" rel="noreferrer">{t('pmsOpenInRedmine')}</a>
+    {/* The task system's text is Markdown: render it, so the reader sees the note and not its source. */}
+    <div className="dt-chat-text"><MarkdownLite text={message.text} /></div>
   </li>
 }
 /** The ticket that works the task, with its stage and its session. */
@@ -25,8 +29,10 @@ function TicketLine({ task, session, open }: { task: NonNullable<TaskDetailView[
   const { t } = usePanel()
   const stage = task.stage === 'person' ? t('pmsTicketWaiting') : task.stage === 'idle' ? t('pmsTicketIdle')
     : task.stage === 'ended' ? t('pmsTicketEnded') : t('pmsTicketWorking')
+  // The Ticket's own mark decides the colour, so the same Ticket reads the same here as in the list.
+  const mark = ticketMark(t, { stage: task.stage, action: task.action })
   return <div className="dt-taskview-ticket">
-    <span className="dt-taskview-ticket-stage" data-state={task.stage}>{stage}</span>
+    <span className="dt-taskview-ticket-stage" data-state={task.stage} data-tone={mark.tone}>{stage}</span>
     <span className="dt-taskview-ticket-title">{t('pmsTicket', { title: task.title })}</span>
     {task.change && <span className="dt-taskview-ticket-change">{t('pmsChange', { number: task.change })}</span>}
     <Button variant="outline" size="sm" icon={<Icon name="session" size={14} />} onClick={open}>{t('openSession')}</Button>
@@ -78,7 +84,6 @@ export function Conversation({ id, onBack, onChanged }: { id: string; onBack: ()
       {data.task.reason && <p className="dt-hint">{t('pmsDeclinedReason', { reason: reasonLabel(t, data.task.reason) })}</p>}
       {data.task.archivedAt && <p className="dt-hint">{t('pmsArchivedHint')}</p>}
       <div className="dt-chat">
-        <h3 className="dt-chat-heading">{t('pmsConversation')}</h3>
         <ol className="dt-chat-list">{data.messages.map(message => <Message key={message.id} message={message} />)}</ol>
       </div>
       {data.canReply ? <form className="dt-chat-composer" onSubmit={submit}>

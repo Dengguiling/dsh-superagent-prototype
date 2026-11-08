@@ -7,11 +7,13 @@ import { EvalStatus } from './eval.tsx'
 import { ExecutionStatus } from './execution.tsx'
 import { ticketMark } from './marks.ts'
 import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
-import { OverviewPage } from './overview.tsx'
+import { CommandPalette, PaletteButton } from './palette.tsx'
+import { PipelinePage } from './pipeline-page.tsx'
+import { SignalRail } from './rail.tsx'
 import { PmsPage } from './pms.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
-import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type Location, type Route,
-  type Tab } from './route.ts'
+import { GROUPS, GROUP_PAGES, HOME, groupOf, initialLocation, lastSettingsGroup, pageRoute, remember, routeLabel,
+  settingsRoute, type Group, type Location, type Page, type Route } from './route.ts'
 import { SettingsPage } from './settings.tsx'
 import { SourceStatus } from './source.tsx'
 import { actorName, errorText, reasonLabel, valueLabel, type T, readableMarkers } from './text.ts'
@@ -27,7 +29,7 @@ export interface AppProps {
 
 function Glossary({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = usePanel()
-  const chinese = t('tab.overview') === zh['tab.overview']
+  const chinese = t('tab.group.inbox') === zh['tab.group.inbox']
   const [own, other] = chinese ? [zh, en] : [en, zh]
   const heading = (group: keyof typeof GLOSSARY) => t(group === 'roles' ? 'glossaryGroup.roles' : `tab.${group}`)
   return <Modal className="dt-glossary-modal" open={open} onClose={onClose} title={t('glossary')} closeLabel={t('close')}
@@ -98,8 +100,8 @@ function SearchResults({ result, query, onClose }: { result: SearchView; query: 
   </div>
 }
 
-function Header({ masterId }: { masterId: string | undefined }) {
-  const { t, call, openSession, notify } = usePanel()
+function Header() {
+  const { t, call, notify } = usePanel()
   const [glossary, setGlossary] = useState(false)
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<{ query: string; value: SearchView }>()
@@ -131,41 +133,54 @@ function Header({ masterId }: { masterId: string | undefined }) {
       </form>
       <Button variant="ghost" size="sm" icon={<Icon name="question" />} aria-label={t('glossary')} title={t('glossary')} aria-haspopup="dialog"
         onClick={() => setGlossary(true)} />
-      <Button variant="outline" size="sm" icon={<Icon name="session" size={14} />} disabled={!masterId}
-        onClick={() => { if (masterId) openSession(masterId).catch(failure => notify(errorText(failure))) }}>{t('openMaster')}</Button>
+      <PaletteButton />
     </div>
     <Glossary open={glossary} onClose={() => setGlossary(false)} />
   </header>
 }
 
-function Pages({ route, openTab, deploymentForm }: { route: Route; openTab: (tab: Tab) => void; deploymentForm: DeploymentForm }) {
-  const { t } = usePanel()
+function Pages({ route, openGroup, openPage, deploymentForm }: { route: Route; openGroup: (group: Group) => void
+  openPage: (page: Page) => void; deploymentForm: DeploymentForm }) {
+  const { t, navigate, drafts } = usePanel()
   const { state, error, reload } = usePanelData()
+  const group = groupOf(route.page)
+  const pages = GROUP_PAGES[group]
+  // A setting that waits to be saved marks the Settings group, so the operator knows it is not written yet.
+  const unsaved = Object.keys(drafts).length > 0
   // Keep the active tab scrolled into view on narrow screens when routes change via links.
-  useEffect(() => { document.getElementById(`dt-tab-${route.page}`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }, [route.page])
+  useEffect(() => { document.getElementById(`dt-tab-${group}`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }, [group])
   const waiting = error ? <p className="dt-error" role="alert">{error.message}</p> : <p className="dt-hint">{t('loading')}</p>
   const page = (() => {
     switch (route.page) {
       case 'pms': return <PmsPage id={route.id} filter={route.query?.filter ?? 'active'} />
-      case 'overview': return <OverviewPage />
-      case 'source': return <SourceStatus />
+      // The flow page: the chart, and the section it points at below it. The route names the section.
+      case 'pipeline': return <PipelinePage view={{ kind: 'source' }} />
+      case 'source': return <PipelinePage view={{ kind: 'source' }} />
       case 'trigger': return route.id !== undefined ? <ThreadPage key={route.id} id={route.id} target={route.query?.trigger} />
-        : <TriggerStatus filter={route.query?.filter ?? 'subscribed'} />
-      case 'eval': return <EvalStatus filter={route.query?.filter ?? 'work'} window={route.query?.window}
-        paused={!!state?.paused} />
+        : <PipelinePage view={{ kind: 'trigger', filter: route.query?.filter ?? 'subscribed' }} />
+      case 'eval': return <PipelinePage view={{ kind: 'eval', filter: route.query?.filter ?? 'work', window: route.query?.window,
+        paused: !!state?.paused }} />
       case 'execution': return route.id !== undefined ? <TicketPage key={route.id} id={route.id} />
-        : state ? <ExecutionStatus filter={route.query?.filter ?? 'open'} state={state} reload={reload} /> : waiting
+        : state ? <PipelinePage view={{ kind: 'execution', filter: route.query?.filter ?? 'open', window: route.query?.window,
+          state, reload }} /> : waiting
       case 'settings': return state ? <SettingsPage key={state.masterId} group={route.query.group} query={route.query} state={state}
         deploymentForm={deploymentForm} /> : waiting
     }
   })()
-  return <div className="dt-page">
-    <div className="dt-column">
-      <Header masterId={state?.masterId} />
+  // The task inbox fills the page: its conversation is a box with its own scroll, not a column of the page's.
+  return <div className="dt-page" data-fill={route.page === 'pms' ? 'true' : undefined}>
+    <div className="dt-column" data-unsaved={unsaved ? 'settings' : undefined}>
+      <Header />
+      <SignalRail onOpenWaiting={() => navigate({ page: 'pms', query: { filter: 'waiting' } })}
+        onOpenProblems={() => navigate({ page: 'pipeline' })} />
       {error && state && <p className="dt-error" role="status">{error.message}</p>}
-      <SegmentedTabs className="dt-tabs" label={t('pagesLabel')} value={route.page} onChange={openTab}
-        items={TABS.map(value => ({ value, label: t(`tab.${value}`), id: `dt-tab-${value}`, panelId: 'dt-page' }))} />
-      <main id="dt-page" role="tabpanel" aria-labelledby={`dt-tab-${route.page}`} className="dt-main">{page}</main>
+      {/* The three destinations of the panel; the pages of the current one sit below them. */}
+      <SegmentedTabs className="dt-grouptabs" label={t('pagesLabel')} value={group} onChange={openGroup}
+        items={GROUPS.map(value => ({ value, label: t(`tab.group.${value}`), id: `dt-tab-${value}`, panelId: 'dt-page' }))} />
+      {pages.length > 1 && <SegmentedTabs className="dt-pagetabs" label={t('pagesLabel')} value={route.page} onChange={openPage}
+        items={pages.map(value => ({ value, label: t(`tab.${value}`), id: `dt-subtab-${value}`, panelId: 'dt-page' }))} />}
+      <main id="dt-page" role="tabpanel" aria-labelledby={pages.length > 1 ? `dt-subtab-${route.page}` : `dt-tab-${group}`}
+        className="dt-main">{page}</main>
     </div>
   </div>
 }
@@ -181,9 +196,15 @@ export function App({ t, openSession, deploymentForm }: AppProps) {
   const navigate = useCallback((route: Route, replace = false) => move(current => ({ route,
     stack: replace ? current.stack : [...current.stack, current.route].slice(-20) })), [move])
   const back = useCallback(() => move(current => ({ route: current.stack.at(-1) ?? HOME, stack: current.stack.slice(0, -1) })), [move])
-  const openTab = useCallback((tab: Tab) => move(current => ({ stack: [], route: tab === 'settings'
-    ? settingsRoute(lastSettingsGroup(current)) : { page: tab, id: undefined } })), [move])
-  return <PanelProvider t={t} openSession={openSession} navigate={navigate} back={back} backLabel={routeLabel(t, location.stack.at(-1) ?? HOME)}>
-    <Pages route={location.route} openTab={openTab} deploymentForm={deploymentForm} />
+  /** Choosing a destination opens the first page of it; the Settings one reopens at the group last read. */
+  const openGroup = useCallback((group: Group) => move(current => ({ stack: [], route: group === 'settings'
+    ? settingsRoute(lastSettingsGroup(current)) : pageRoute(GROUP_PAGES[group][0]!) })), [move])
+  const openPage = useCallback((page: Page) => move(current => ({ stack: [], route: pageRoute(page) })), [move])
+  // The back label names where the back button goes, and there is no button when the panel opened here.
+  const backLabel = location.stack.length ? routeLabel(t, location.stack.at(-1)!) : ''
+  return <PanelProvider t={t} openSession={openSession} navigate={navigate} back={back} backLabel={backLabel}>
+    <CommandPalette onGroup={openGroup} onPage={openPage}>
+      <Pages route={location.route} openGroup={openGroup} openPage={openPage} deploymentForm={deploymentForm} />
+    </CommandPalette>
   </PanelProvider>
 }

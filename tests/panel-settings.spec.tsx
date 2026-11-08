@@ -5,13 +5,13 @@ import { createRoot } from 'react-dom/client'
 import { Fields } from '../src/client/settings-kit.tsx'
 import { expect, it, onTestFinished } from 'vitest'
 import { zh } from '../src/client/locales.ts'
-import { usePanel, mount, remount, settle, all, find, tab, click, type, text, field } from './fixtures/panel.tsx'
+import { usePanel, mount, remount, settle, all, find, tab, click, type, text, field, openPage } from './fixtures/panel.tsx'
 import { server } from './fixtures/panel-server.ts'
 
 usePanel()
 it('keeps a person\'s own value where another save changed the same setting, and says so', async () => {
   await mount()
-  await click(zh['tab.execution'])
+  await openPage(zh, 'execution')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   await type(field<HTMLInputElement>(zh.maxWorkers), '6')
   server.settings = { ...server.settings, executor: { ...server.settings.executor, maxWorkers: 4 } }
@@ -25,7 +25,7 @@ it('keeps a person\'s own value where another save changed the same setting, and
 
 it('saves the Eval block on the Policy settings and the Executor with its execution environment on the Execution settings, each against its own revision', async () => {
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   await click(zh['mode.auto'])
   await type(field<HTMLInputElement>(zh.evalTimeout), '180')
@@ -66,7 +66,7 @@ it('loads configuration history on demand with localized changes, Source field l
     changes: [{ code: 'mode', from: 'off', to: 'observe' }, { code: 'sourceRowsAdded', source: 'feishu', field: 'allowed', items: ['Bob'],
       part: true }, { code: 'sourceField', source: 'feishu', field: 'syncChat', from: '', to: 'oc_team', part: true }] }] }
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   expect(server.requests.some(request => request.path === 'policy/history')).toBe(false)
   await click(zh.configHistory)
@@ -76,7 +76,7 @@ it('loads configuration history on demand with localized changes, Source field l
 
 it('shows save and discard only while a settings block has edits, at the end of that block', async () => {
   await mount()
-  await click(zh['tab.execution'])
+  await openPage(zh, 'execution')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   expect(all('.dt-savebar')).toHaveLength(0)
   await type(field<HTMLInputElement>(zh.maxWorkers), '6')
@@ -102,7 +102,7 @@ it('shows save and discard only while a settings block has edits, at the end of 
   await click(find(zh['term.source'], '.dt-settings-link'))
   expect(all('.dt-savebar')).toHaveLength(0)
   const redmine = all('.dt-card').find(card => card.querySelector('.dt-card-title')?.textContent === 'Redmine')!
-  await type(field<HTMLInputElement>('绑定的 Redmine 账号'), 'agent-bot')
+  await type(field<HTMLInputElement>('API 密钥'), 'other-key')
   expect(redmine.lastElementChild!.classList.contains('dt-savebar')).toBe(true)
   // The agent account is read by setup, so the bar warns that saving restarts dsh-superagent and interrupts running work.
   expect(redmine.lastElementChild!.textContent).toContain('2 个进行中的派工会中断')
@@ -130,17 +130,17 @@ it('lists the settings groups stages first, opens each stage\'s group from its s
   await click(tab(zh['tab.settings']))
   expect(all('.dt-settings-link').map(link => link.textContent)).toEqual(['来源', '评估', '执行', '提示词', '部署'])
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['term.source'])
-  for (const [tab, group] of [['来源', '来源'], ['评估', '评估'], ['执行', '执行']] as const) {
-    await click(find(tab, '[role="tab"]'))
+  for (const [page, group] of [['source', '来源'], ['eval', '评估'], ['execution', '执行']] as const) {
+    await openPage(zh, page)
     await click(find(zh['tab.settings'], '.dt-status-head button'))
     expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(group)
   }
   // The Trigger stage has no settings, so its status offers none.
-  await click(tab(zh['tab.trigger']))
+  await openPage(zh, 'trigger')
   expect(all('.dt-status-head button').map(button => button.textContent)).not.toContain(zh['tab.settings'])
   await click(tab(zh['tab.settings']))
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['promptPart.runtime/work'])
-  await click(tab(zh['tab.trigger']))
+  await openPage(zh, 'trigger')
   await remount()
   await click(tab(zh['tab.settings']))
   expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['promptPart.runtime/work'])

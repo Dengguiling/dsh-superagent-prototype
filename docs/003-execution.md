@@ -71,7 +71,7 @@ The prepare command and Executor instructions receive the same execution variabl
 | `DSH_SUPERAGENT_REDMINE_URL`, `DSH_SUPERAGENT_REDMINE_PROJECT` | Redmine | The address of the task system, and the project of the issue that started the Ticket |
 | `DSH_SUPERAGENT_REDMINE_ISSUE_ID`, `DSH_SUPERAGENT_REDMINE_ISSUE_URL` | Redmine | The issue that started the Ticket, and its page |
 | `DSH_SUPERAGENT_REDMINE_LOGIN` | Redmine | The bound account's login; mentioning it addresses the agent |
-| `DSH_SUPERAGENT_GERRIT_SSH_URL`, `DSH_SUPERAGENT_GERRIT_PUSH_REF` | Gerrit | The SSH address of the Ticket's repository — the issue's Redmine project under the review server — used to clone and to push, and the ref patches are pushed to, such as `refs/for/main` |
+| `DSH_SUPERAGENT_GERRIT_SSH_URL`, `DSH_SUPERAGENT_GERRIT_BRANCH` | Gerrit | The SSH address of the Ticket's repository — the issue's Redmine project under the review server — used to clone and to push, and the branch the patches are pushed to, which is the branch of the change the ticket works on |
 | `DSH_SUPERAGENT_GERRIT_HTTP_URL`, `DSH_SUPERAGENT_GERRIT_PROJECT` | Gerrit | The HTTP address of the review server, and the Ticket's repository: the issue's Redmine project identifier, which a configured Gerrit project overrides |
 | `DSH_SUPERAGENT_GERRIT_BRANCH` | Gerrit | The branch patches are pushed to |
 | `DSH_SUPERAGENT_GERRIT_USER`, `DSH_SUPERAGENT_GERRIT_EMAIL` | Gerrit | The agent's Gerrit account, and the commit email the review server accepts |

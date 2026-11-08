@@ -32,11 +32,18 @@ export function basisFacts(basis: MandateBasis, rule: Snapshot['rule']): { facts
   if (authority) facts.push({ name: 'legacyAuthority', value: authority })
   return { facts, legacy: authority !== undefined }
 }
-export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'], offset: number, limit: number) {
+/**
+ * The tickets of one stage, newest first. `since` narrows the ended stage to the tickets that ended at or after that
+ * moment, so the panel's "done in the last day" count and the list it opens hold the same tickets.
+ */
+export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'], offset: number, limit: number, since = '') {
   const view = snapshot(host)
   const { store } = view
   const shown = (ticket: Ticket) => stage === 'open' ? liveTicket(ticket) : ticketStage(ticket).stage === stage
-  const tickets = (stage === 'ended' ? store.tickets.list() : store.tickets.open()).filter(shown).sort(newestFirst)
+  // The window counts only the tickets that ended; the other stages hold the work of right now.
+  const endedSince = stage === 'ended' ? since : ''
+  const tickets = (stage === 'ended' ? store.tickets.list() : store.tickets.open()).filter(shown)
+    .filter(ticket => !endedSince || (ticket.ended?.at ?? '') >= endedSince).sort(newestFirst)
   const result = page(tickets, offset, limit)
   return { ...result, items: result.items.map(ticket => ticketRow(view, ticket)) }
 }

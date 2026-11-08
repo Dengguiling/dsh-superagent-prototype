@@ -3,15 +3,15 @@
 import { act } from 'react'
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
-import { usePanel, mount, remount, settle, all, find, tab, click, type, text, field } from './fixtures/panel.tsx'
+import { usePanel, mount, remount, settle, all, find, tab, click, type, text, field, openPage } from './fixtures/panel.tsx'
 import { server } from './fixtures/panel-server.ts'
 
 usePanel()
 it('opens the Decisions under Policy from the flow line with their reasons, Decisions that start work first, filterable by kind',
   async () => {
   await mount()
-  await click(zh['tab.eval'])
-  expect(tab(zh['tab.eval']).getAttribute('aria-selected')).toBe('true')
+  await openPage(zh, 'eval')
+  expect(document.querySelector('.dt-status-title')?.textContent).toBe(zh['tab.eval'])
   expect(server.requests.some(request => request.path === 'decisions?limit=30&kind=accept,reopen')).toBe(true)
   expect(text()).toContain(zh['reason.explicitRouted'])
   // The window of the log is the operator's choice: the last day, or every Decision kept.
@@ -35,7 +35,7 @@ it('keeps a Policy draft across remounts, and merges another save into it sender
       'ou_newperson'); await type(row.querySelector<HTMLInputElement>('input[aria-label="名字"]')!, '新人')
   }
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   expect(all('.dt-subtab').map(tab => tab.textContent)).toEqual(['飞书', 'Redmine', 'Gerrit'])
   await addUser()
@@ -69,15 +69,14 @@ it('keeps the Policy to its rules and each Source\'s part, in that Source\'s own
   expect(all('.dt-lv').map(item => item.textContent)[0]).toBe('策略版本 abcdef12')
   expect(text()).toContain('名单内的人 @ 机器人或私聊机器人，总是明确的请求')
   await click(find(zh['source.redmine'], '.dt-subtab'))
-  expect(text()).toContain('能发起工作的 Redmine 账号')
-  expect(text()).toContain('名单里的 Redmine 账号在事务里 @ 智能体的账号，或把事务指派给它。')
-  // A saved account shows as its id; only a row being added is a field.
-  expect(all('.dt-part .dt-rows-item .dt-row-label').map(label => label.textContent)).toEqual(['alice'])
+  // Redmine admits by relation: it keeps no sender list, only the explicit-request description and its admission table.
+  expect(text()).toContain('任何 Redmine 账号把事务指派给智能体，或在事务或讨论里 @ 它的账号；不设名单，谁发起都可以。')
+  expect(all('.dt-part .dt-rows-item')).toHaveLength(0)
 })
 
 it('opens the rule list for an invalid field inside it only', async () => {
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   const openRows = () => all('.dt-disclosure[data-open]').length
   await act(async () => { field(zh.evalTimeout).dispatchEvent(new Event('invalid', { bubbles: false })) })
@@ -89,7 +88,7 @@ it('opens the rule list for an invalid field inside it only', async () => {
 
 it('syncs a Source\'s list from where the Source keeps it, but not while a Policy draft is unsaved', async () => {
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   expect([...all('.dt-part select')[0]!.querySelectorAll('option')].map(option => option.textContent)).toEqual(['不同步', '另一个群', '团队群'])
   await click(find('立即同步', '.dt-part button'))
@@ -103,7 +102,7 @@ it('syncs a Source\'s list from where the Source keeps it, but not while a Polic
 
 it('adds, copies, renames, disables and deletes rules in Policy without touching Eval', async () => {
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   await click(zh.addRule)
   await type(field<HTMLInputElement>(zh.ruleName), '文档')
@@ -120,13 +119,13 @@ it('adds, copies, renames, disables and deletes rules in Policy without touching
 
 it('shows the current Policy version once, explains what makes it up, and opens a Mandate\'s version in the Policy history', async () => {
   await mount()
-  await click(zh['tab.eval'])
+  await openPage(zh, 'eval')
   await click(find(zh['tab.settings'], '.dt-status-head button'))
   await settle()
   expect(all('.dt-lv')[0]!.textContent).toBe('策略版本 abcdef12')
   expect(all('.dt-info').map(tip => tip.getAttribute('aria-label')).join('\n')).toContain('策略版本由接单规则、各来源上的策略和评估的接单模式决定')
   expect(all('.dt-tag').filter(tag => tag.textContent === '计入策略版本')).toHaveLength(0)
-  await click(tab(zh['tab.execution']))
+  await openPage(zh, 'execution')
   await click('修复回归')
   await click('abcdef12')
   expect(tab(zh['tab.settings']).getAttribute('aria-selected')).toBe('true')
@@ -160,7 +159,7 @@ it('sets the Feishu admission table per receiving scope, offering only the cells
   expect(server.settings.policy.sources.feishu!.admission).toEqual({ oc_team: { unlistedAddressed: 'explicit' } })
 })
 
-it('lists each Source\'s bots next to its people and saves them, and sets the Redmine admission table by its receiving scopes', async () => {
+it('lists each Source\'s bots next to its people, and keeps Redmine to its admission table without a list', async () => {
   await mount()
   await click(tab(zh['tab.settings']))
   // The Redmine Source receives only what is addressed to the agent until a switch opens a scope of the project.
@@ -179,18 +178,16 @@ it('lists each Source\'s bots next to its people and saves them, and sets the Re
   await type(bot.querySelector<HTMLInputElement>('input[aria-label="App ID 或 open_id"]')!, 'cli_reviewer')
   await type(bot.querySelector<HTMLInputElement>('input[aria-label="名字"]')!, '评审机器人')
   await click(find(zh['source.redmine'], '.dt-subtab'))
-  expect(lists()).toEqual(['能发起工作的 Redmine 账号'])
-  const account = await add('能发起工作的 Redmine 账号')
-  await type(account.querySelector<HTMLInputElement>('input[aria-label="名字"]')!, 'bob')
-  await type(account.querySelector<HTMLInputElement>('input[aria-label="备注"]')!, 'Bob')
-  // Until the Redmine Source receives the project's issues or their discussion, only messages that mention the agent arrive.
+  // A relation Source keeps no list: every row has a spoke-to cell that is always explicit, and a cell per observed scope.
+  expect(lists()).toEqual([])
   const rows = () => all('.dt-admission tbody tr').map(row => [row.querySelector('.dt-admission-scope')!.firstChild?.textContent,
     row.querySelector('.dt-admission-scope small')?.textContent, row.querySelectorAll('select').length])
-  expect(rows()).toEqual([['新事务', '仅指派或 @', 1], ['事务下的讨论', '仅指派或 @', 1]])
-  expect(field<HTMLSelectElement>('新事务 · 名单外 · 点名智能体').value).toBe('ignore')
+  expect(rows()).toEqual([['新事务', '仅指派或 @', 0], ['事务下的讨论', '仅指派或 @', 0]])
+  expect(all('.dt-admission tbody td').map(cell => cell.textContent)).toContain('总是明确的请求')
   await click(zh.save)
   expect(server.settings.policy.sources.feishu!.bots).toEqual([{ id: 'cli_reviewer', name: '评审机器人' }])
-  expect(server.settings.policy.sources.redmine!.allowed).toEqual([{ id: 'alice' }, { id: 'bob', name: 'Bob' }])
+  // The retired Redmine list is dropped by the save instead of being kept.
+  expect(server.settings.policy.sources.redmine).toEqual({ admission: {} })
 })
 
 it('shows the Redmine Source\'s switches for what it receives across the project, and the admission rows they open, in English', async () => {
@@ -209,8 +206,9 @@ it('shows the Redmine Source\'s switches for what it receives across the project
   await click(find(en['source.redmine'], '.dt-subtab'))
   const rows = all('.dt-admission tbody tr').map(row => [row.querySelector('.dt-admission-scope')!.firstChild?.textContent,
     row.querySelectorAll('select').length])
-  expect(rows).toEqual([['New issues', 3], ['Issue discussion', 3]])
-  // A received scope offers the cell of a message off the list that does not mention the agent.
+  expect(rows).toEqual([['New issues', 1], ['Issue discussion', 1]])
+  // A received scope offers the cell of a message that does not speak to the agent.
   expect(field('New issues · Not on the list · no mention')).toBeTruthy()
-  expect(all('.dt-admission thead th').map(cell => cell.textContent)).toContain(en.admissionAddressed)
+  expect(all('.dt-admission thead th').map(cell => cell.textContent)).toEqual([en.admissionScope, en.admissionRelationAddressed,
+    en.admissionRelationUnaddressed])
 })

@@ -1,6 +1,6 @@
 /** SourceKind plugin contract: configuration schema, UI form fields, policy integration, channel adapter, and thread context reader. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { z } from 'zod'
+import { z } from 'zod'
 import type { OutboundMessage, ScopeResult, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import type { Commands } from '../infra/commands.ts'
@@ -24,14 +24,21 @@ export type FieldSpec =
 export interface VariableSpec { key: string; description: Localized }
 export interface EnvironmentInput<C> { deployment: Deployment; config: C; trigger?: Trigger }
 export interface AdmissionRowView { id: string; label: Localized | string; note: Localized; cells: { listedUnaddressed: boolean; unlistedAddressed: boolean; unlistedUnaddressed: boolean } }
-/** Policy extension for a source kind, defining allowed senders, admission table rows, and optional external roster sync. */
-export interface SourcePolicyPart<P extends Record<string, unknown>> {
-  /** Validates the Source's part of the Policy, including `allowed` (senders who may originate work). */
+/**
+ * Policy extension for a source kind, defining how senders may originate work, admission table rows, and optional
+ * external roster sync. A kind admits by list or by relation: a listed kind keeps `allowed` senders and only their
+ * addressed messages are explicit requests, while a relation kind keeps no list at all — whatever speaks to the agent
+ * (an assignment, a mention, a review comment on its own change) is an explicit request from anyone.
+ */
+export interface SourcePolicyPart<P extends Record<string, unknown> = Record<string, unknown>> {
+  /** Validates the Source's part of the Policy, `allowed` included only on a kind that keeps a sender list. */
   schema: z.ZodType<P>
-  /** Form fields of the policy part; the first is `allowed`. */
+  /** Form fields of the policy part; a listed kind's first field is `allowed`. */
   fields: FieldSpec[]
-  /** Describes what the Source marks as addressed to the agent, which an allowed sender's explicit request requires. */
+  /** Describes what the Source marks as addressed to the agent: on a relation Source that alone is an explicit request, on a listed one it takes an allowed sender. */
   explicit: Localized
+  /** True when the kind admits senders by relation instead of a list: an addressed message is an explicit request from anyone. */
+  relation?: true
   /** Fallback display labels for unlisted human or bot senders when raw sender IDs are not human-readable. */
   unnamed?: { person: Localized; bot: Localized }
   /** Receiving scopes of the Policy's admission table under `config` (matching `scope().row`); kinds without `rows` use the table's defaults. */
@@ -86,10 +93,20 @@ export interface TriggerContext {
   image(agent: Agent, commands: Commands, message: { id: string; text: string }, key: string, stateDir: string,
     signal: AbortSignal): Promise<unknown>
 }
+/**
+ * A Source's configuration without the fields the kind no longer has, so a configuration saved earlier still loads: the
+ * retired values are dropped instead of refused, and every other unknown key still is.
+ */
+export const retired = <T extends z.ZodTypeAny>(schema: T, fields: readonly string[]) => z.preprocess((value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => !fields.includes(key)))
+    : value, schema)
 /** Pluggable source kind descriptor registered with SourceRegistry. */
 export interface SourceKind<C extends Record<string, unknown> = Record<string, unknown>> {
   /** Stable ID; a default instance with the same ID exists when none is stored. */
   kind: string
+  /** Where the kind stands in the source list; the main input comes first, the kinds without one keep their ID order. */
+  order?: number
   title: Localized
   description: Localized
   /** Read-only status facts derived from `deployment` (undefined while waiting for setup), keyed by field key. */
@@ -109,8 +126,8 @@ export interface SourceKind<C extends Record<string, unknown> = Record<string, u
   find?(query: string): { threads: string[]; terms: string[] }
   /** Returns the ID of the Trigger whose message this Trigger replies to, when derivable without a network read. */
   repliesTo?(trigger: Trigger): string | undefined
-  /** Policy section for kinds whose senders have their own identity. */
-  policy?: SourcePolicyPart<Record<string, unknown> & { allowed: { id: string; name?: string }[] }>
+  /** Policy section for kinds whose senders have their own identity: a list or a relation, per `SourcePolicyPart`. */
+  policy?: SourcePolicyPart
   /** Rereads display names for row keys (such as chat names), stores the resolved names in `KV.sources.labels(kind)`, and returns them. */
   refreshLabels?(host: SourceHost, signal?: AbortSignal): Promise<Record<string, string>>
   /** Variables the kind registers with the execution environment and how their values are computed. */

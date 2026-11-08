@@ -4,7 +4,7 @@
 >
 > We have adapted it for publication, so it is not identical to our internal version or the implementation described in *Exploring Super-agent Design: Towards a More Autonomous Agent System*. Some designs discussed in the article are directions for future development and are not implemented in this prototype.
 
-dsh-superagent is a proactive coding agent for a task system and a code review server, packaged as a bundle for [DeepSeek Harness](https://www.deepseek.com/en/harness/). It listens to **Redmine** for the work and, optionally, Feishu. When someone allowed asks the agent for work, it opens a work item, works on it in its own agent session and directory, and answers in the original conversation, for example with a patch for review. A web panel leads with a live dashboard of the pipeline, and a workbench is the operator's task inbox: the Redmine issues assigned to their account, each with the conversation with the agent that continues the work.
+dsh-superagent is a proactive coding agent for a task system and a code review server, packaged as a bundle for [DeepSeek Harness](https://www.deepseek.com/en/harness/). It listens to **Redmine** for the work and, optionally, Feishu. When a task is assigned to it or someone mentions it, it opens a work item, works on it in its own agent session and directory, and answers in the original conversation, for example with a patch for review. A web panel leads with a live dashboard of the pipeline, and a workbench is the operator's task inbox: the Redmine issues assigned to their account, each with the conversation with the agent that continues the work.
 
 The company setup is the point of it: a person opens an issue in Redmine, the agent takes it, solves it, pushes the patch to **Gerrit** for review, and answers on the issue. One Redmine account is enough — the agent binds to the operator's own account and takes the issues assigned to it — and the company's many repositories need no configured project: the agent tracks every patch set whose commit message names an issue. [docs/010-corporate-redmine-gerrit.md](docs/010-corporate-redmine-gerrit.md) describes that installation, and The repository `dsh-superagent-env`, next to this one, holds a Docker stack that runs it locally.
 
@@ -34,6 +34,20 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [009 Redmine and Gerrit integration](docs/009-redmine-gerrit-integration.md): the task system and the review server, their APIs and their quirks
 - [010 Corporate Redmine and Gerrit](docs/010-corporate-redmine-gerrit.md): running the agent where Redmine holds the tasks and Gerrit holds the patches
 - [011 交互场景清单](docs/011-interaction-scenarios.md): the situations the agent meets, one by one
+
+## Design
+
+The panel redesign: what the pages got wrong, the improvement plan, and an interactive prototype.
+
+- [Redesign plan](design/redesign-plan.md): the problems, the batches, and what each batch changed (see §4.5)
+- [Audit · Overview and Workbench](design/audit-ops.md)
+- [Audit · Record pages](design/audit-records.md)
+- [Audit · Settings and design system](design/audit-settings.md)
+- [Prototype](prototype/redesign.html): open it in a browser
+
+The panel now has three destinations — **任务工作台** (the task inbox), **流水线** (the
+flow of the work and its stages) and **设置** — with the pages of each below them. A rail above every page
+carries the live state, the work that waits for a person, the Executor's load and the switch that stops it.
 
 ## Development
 

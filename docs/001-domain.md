@@ -36,7 +36,7 @@ Source, Thread, Eval, Mandate and Subscription form the core domain; the rest su
 | Assignment | The binding of a Ticket to one Executor instance | A Ticket has several over time. Goes pending → running → ended independently of the Ticket. Only its final report may end the Ticket on the Executor's side | The Executor is outside the domain, but who executes must be inside it |
 | Subscription | A many-to-many relation between Tickets and Threads, held by the Thread | A matching Trigger fans out to every live subscribed Ticket, with no check of who sent it; a person's message that reaches a Ticket this way takes no Eval. A Thread an Executor follows for context reaches its Ticket the same way, but lends it no authority and does not resume it. An ended Ticket keeps its Subscriptions, including that of a change that closed or merged: a person's message resumes it under the same Mandate, with no Eval or Decision; messages from bots and machines do not reach it, since its Executor reads its Threads again when it resumes. A Ticket a person stopped receives nothing. The main Session attaches a Thread to an existing Ticket only when its message points at that Ticket explicitly. A person can drop every Subscription on a Thread; an Executor can drop only its own Ticket's Subscription to a Thread it finds unrelated, except the Thread its Ticket started on and a Thread a Source made it follow, such as its change's | Later discussion reaches the Executor without anyone mentioning the agent again |
 
-A person is not a domain concept. A Trigger carries its actor's identifier as the Source gives it. An allowed list is a Source's part of the Policy, in that Source's identities. That one person has accounts on several Sources is prompt text that the agents read when they need it.
+A person is not a domain concept. A Trigger carries its actor's identifier as the Source gives it. How senders may originate work — a list of accounts, or a relation such as an assignment or a comment on the agent's own change — is a Source's part of the Policy, in that Source's own terms. That one person has accounts on several Sources is prompt text that the agents read when they need it.
 
 The Executor, with its Sessions and directories, is outside the domain and connects through Assignments.
 
@@ -46,7 +46,7 @@ Aggregates: a Source holds its read position. A Thread holds its Subscriptions, 
 
 | Rejected | Reason |
 | --- | --- |
-| Principal or Membership as an entity, or mapping identities across Sources | A person is Trigger metadata; an allowed list is a Source's part of the Policy; a cross-Source mapping is prompt text |
+| Principal or Membership as an entity, or mapping identities across Sources | A person is Trigger metadata; who may originate work is a Source's part of the Policy; a cross-Source mapping is prompt text |
 | Eval scheduling its own delayed Triggers | A condition that needs waiting is an ordinary Source, so Eval never depends back on Sources |
 | Waiting or revoked Eval states | Waiting belongs to Sources; an Eval that runs out of time queues its Triggers again, or ends `unavailable` |
 | At most one live Ticket per Thread | One Thread can carry several independent pieces of work; the assessment avoids duplicates from the Ticket list |
@@ -66,7 +66,7 @@ The concepts above and their rules are reusable. The Source implementations, the
 | Part | In this repository |
 | --- | --- |
 | Source | Redmine: the changed issues and their journals, where the work is the issues assigned to the bound account. Gerrit: the open changes whose commit messages name a Redmine issue, with their review comments and change messages, in every repository; also the changes open Tickets follow. Feishu: live events, history recovery, polling of subscribed topics |
-| Policy | Assessment rules, and each Source's allowed list, its sync, its bot list and its admission table |
+| Policy | Assessment rules, and each Source's admission: its sender list when it keeps one, its bot list and its admission table |
 | Executor | A DSH Executor Session and a directory per Ticket, in an execution environment whose variables the Executor and the Sources register |
 | Channel | Notes on Redmine issues, review messages on Gerrit changes, Feishu topic replies |
 

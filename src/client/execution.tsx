@@ -9,14 +9,15 @@ import { usePanel } from './provider.tsx'
 import { TicketLine } from './rows.tsx'
 import { ConfigHistory, Field, Fields, ModelField, numberOf, useBlockDraft, useSettings } from './settings-kit.tsx'
 import { localized } from './text.ts'
-import { ConfirmButton, Hint, LabelValue, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
+import { ConfirmButton, Hint, LabelValue, ListTotal, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
 
-export function ExecutionStatus({ filter: current, state, reload }: {
-  filter: TicketFilter; state: StateView; reload: () => Promise<void>
+export function ExecutionStatus({ filter: current, window, state, reload }: {
+  filter: TicketFilter; window: '24h' | undefined; state: StateView; reload: () => Promise<void>
 }) {
   const { t, call, navigate } = usePanel()
   const [limit, setLimit] = useState(20)
-  const { data, error, reload: reloadTickets } = usePoll(() => call('GET tickets', { query: { state: current, limit } }), [current, limit])
+  const { data, error, reload: reloadTickets } = usePoll(() => call('GET tickets', { query: { state: current, limit,
+    ...window ? { window } : {} } }), [current, limit, window])
   const { paused, load: { maxWorkers } } = state
   // Pausing uses its own block revision so toggling pause does not invalidate an open Execution settings draft.
   const pause = async () => { await call('POST executor/pause', { body: { paused: !paused } }); await reload() }
@@ -24,8 +25,11 @@ export function ExecutionStatus({ filter: current, state, reload }: {
     label: t('processingPaused') }
     : { tone: 'ongoing', label: t('executorRunning') }
   const action = paused ? 'resumeProcessing' : 'pauseProcessing'
+  // The window narrows the ended tickets only, so it belongs to that filter alone.
+  const show = (key: TicketFilter, last24h: boolean) => navigate({ page: 'execution', query: {
+    ...key === 'open' ? {} : { filter: key }, ...last24h ? { window: '24h' } : {} } }, true)
   return <>
-    <StatusHead hint={t('executionStatusIntro')} settings="execution" />
+    <StatusHead title={t('tab.execution')} hint={t('executionStatusIntro')} settings="execution" />
     <div className="dt-row-meta dt-status-line">
       <span className="dt-status-text" data-state={status.tone}>{status.label}</span>
       {!state.setup.problem && <>
@@ -36,16 +40,20 @@ export function ExecutionStatus({ filter: current, state, reload }: {
         ? 'resumeProcessingConfirm' : 'pauseProcessingConfirm')}
         onConfirm={pause} />
     </div>
-    <div className="dt-filters">
+    <div className="dt-filters" role="group" aria-label={t('ticketFilters')}>
       {TICKET_FILTERS.map(value => <Pill key={value} active={current === value}
-        onClick={() => { setLimit(20); navigate({ page: 'execution', query: value === 'open' ? {} : { filter: value } },
-          true) }}>{t(`ticketFilter.${value}`)}</Pill>)}
+        onClick={() => { setLimit(20); show(value, false) }}>{t(`ticketFilter.${value}`)}</Pill>)}
+      {current === 'ended' && <>
+        <span className="dt-filter-gap" />
+        <Pill active={window === '24h'} onClick={() => { setLimit(20); show('ended', window !== '24h') }}>{t('endedLastDayOnly')}</Pill>
+      </>}
     </div>
     {current === 'idle' && <Hint>{t('idleHint')}</Hint>}
     <LoadState error={error} loading={!data} />
     {data && (data.items.length ? <ul className="dt-list">{data.items.map(ticket => ticket.stage === 'person'
       ? <TicketLine key={ticket.id} ticket={ticket} question
         onChanged={reloadTickets} /> : <TicketLine key={ticket.id} ticket={ticket} />)}</ul> : <Hint>{t('none')}</Hint>)}
+    {data && data.total > data.items.length && <ListTotal shown={data.items.length} total={data.total} />}
     {data?.next_offset != null && <LoadMore onMore={() => setLimit(limit + 20)} />}
   </>
 }

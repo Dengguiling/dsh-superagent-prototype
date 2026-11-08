@@ -10,7 +10,7 @@ import { useAction, usePanel } from './provider.tsx'
 import { DecisionLine } from './rows.tsx'
 import { ConfigHistory, Field, Fields, ModelField, SourceField, numberOf, useBlockDraft, useSettings } from './settings-kit.tsx'
 import { localized, valueLabel, when } from './text.ts'
-import { Hint, LabelValue, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
+import { Hint, LabelValue, ListTotal, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
 
 export function EvalStatus({ filter, window, paused }: { filter: DecisionFilter; window: '24h' | undefined; paused: boolean }) {
   const { t, call, navigate } = usePanel()
@@ -20,12 +20,12 @@ export function EvalStatus({ filter, window, paused }: { filter: DecisionFilter;
   const show = (key: DecisionFilter, last24h: boolean) => navigate({ page: 'eval', query: { ...key === 'work' ? {} : { filter: key },
     ...last24h ? { window: '24h' } : {} } }, true)
   return <>
-    <StatusHead hint={t('evalStatusIntro')} settings="eval" />
+    <StatusHead title={t('tab.eval')} hint={t('evalStatusIntro')} settings="eval" />
     {paused && <p className="dt-banner">
       {t('evalRecordsPaused')} <button type="button" className="dt-textlink"
         onClick={() => navigate({ page: 'execution' })}>{t('resumeWhere')}</button>
     </p>}
-    <div className="dt-filters">
+    <div className="dt-filters" role="group" aria-label={t('decisionFilters')}>
       {DECISION_FILTERS.map(key => <Pill key={key} active={filter === key} onClick={() => { setLimit(30); show(key, !!window) }}>
         {t(`decisionFilter.${key}`)}
       </Pill>)}
@@ -36,6 +36,7 @@ export function EvalStatus({ filter, window, paused }: { filter: DecisionFilter;
     <LoadState error={error} loading={!data} />
     {data && (data.items.length ? <ul className="dt-list">{data.items.map(decision => <DecisionLine key={decision.id}
       decision={decision} />)}</ul> : <Hint>{t('none')}</Hint>)}
+    {data && data.total > data.items.length && <ListTotal shown={data.items.length} total={data.total} />}
     {data?.next_offset != null && <LoadMore onMore={() => setLimit(limit + 30)} />}
   </>
 }
@@ -90,7 +91,7 @@ function SourcePart({ source, part, saved, dirty, onChange, reload }: {
       {sync.health?.state === 'error' && <span className="dt-error dt-clamp">{sync.health.detail}</span>}
     </div>}
     {policy.rows ? <AdmissionTable rows={policy.rows} labels={source.labels} table={(part.admission ?? {}) as AdmissionTable}
-      explicit={localized(t, policy.explicit)}
+      explicit={localized(t, policy.explicit)} relation={policy.relation === true}
       onChange={admission => onChange({ ...part, admission })} />
       : <div className="dt-field"><span className="dt-field-head">{t('explicitRequest')}</span><span>{localized(t,
         policy.explicit)}</span></div>}
@@ -99,9 +100,9 @@ function SourcePart({ source, part, saved, dirty, onChange, reload }: {
 
 type AdmissionTable = Record<string, Partial<Record<AdmissionCell, Admission>>>
 const CELLS: readonly AdmissionCell[] = ['listedUnaddressed', 'unlistedAddressed', 'unlistedUnaddressed']
-function AdmissionTable({ rows, labels, table, explicit, onChange }: {
+function AdmissionTable({ rows, labels, table, explicit, relation, onChange }: {
   rows: AdmissionRowView[]; labels: Record<string,
-    string>; table: AdmissionTable; explicit: string; onChange: (table: AdmissionTable) => void
+    string>; table: AdmissionTable; explicit: string; relation: boolean; onChange: (table: AdmissionTable) => void
 }) {
   const { t } = usePanel()
   const name = (row: AdmissionRowView) => labels[row.id] ?? localized(t, row.label)
@@ -118,19 +119,29 @@ function AdmissionTable({ rows, labels, table, explicit, onChange }: {
         text={t('admissionAnyoneWarning')} icon="alert" warn />}</span>
     </span></td>
   }
+  const scope = (row: AdmissionRowView) => <td className="dt-admission-scope">{name(row)}<small>{localized(t, row.note)}</small></td>
+  const empty = (cell: AdmissionCell) => <td key={cell} className="dt-admission-na" aria-label={t('admissionNotReceived')}>—</td>
   return <Section title={t('admission')} hint={t('admissionHint')}>
     <Hint>{explicit}</Hint>
-    <table className="dt-table dt-admission">
+    {relation ? <table className="dt-table dt-admission">
+      <thead>
+        <tr><th>{t('admissionScope')}</th><th>{t('admissionRelationAddressed')}</th><th>{t('admissionRelationUnaddressed')}</th></tr>
+      </thead>
+      <tbody>{rows.map(row => <tr key={row.id}>
+        {scope(row)}
+        <td>{t('admissionAlwaysExplicit')}</td>
+        {row.cells.unlistedUnaddressed ? select(row, 'unlistedUnaddressed') : empty('unlistedUnaddressed')}
+      </tr>)}</tbody>
+    </table> : <table className="dt-table dt-admission">
       <thead>
         <tr><th rowSpan={2}>{t('admissionScope')}</th><th>{t('admissionListed')}</th><th colSpan={2}>{t('admissionUnlisted')}</th></tr>
         <tr><th>{t('admissionUnaddressed')}</th><th>{t('admissionAddressed')}</th><th>{t('admissionUnaddressed')}</th></tr>
       </thead>
       <tbody>{rows.map(row => <tr key={row.id}>
-        <td className="dt-admission-scope">{name(row)}<small>{localized(t, row.note)}</small></td>
-        {CELLS.map(cell => row.cells[cell] ? select(row, cell) : <td key={cell} className="dt-admission-na"
-          aria-label={t('admissionNotReceived')}>—</td>)}
+        {scope(row)}
+        {CELLS.map(cell => row.cells[cell] ? select(row, cell) : empty(cell))}
       </tr>)}</tbody>
-    </table>
+    </table>}
     <Hint>{t('admissionFootnote')}</Hint>
   </Section>
 }
@@ -153,7 +164,13 @@ function PolicyBlock() {
   // Expand all rules when native form validation fails inside a collapsed rule.
   const reveal = (target: EventTarget) => { if (target instanceof Element
     && target.closest('.dt-rules')) setExpanded(new Set(policy.rules.map(rule => rule.id))) }
-  const part = (id: string) => (policy.sources[id] ?? { allowed: [] }) as Part
+  // The draft keeps the keys the Source's part still declares, plus the admission table: a retired key a saved Policy
+  // still carries, such as a relation Source's dropped list, is not sent back.
+  const part = (id: string) => {
+    const stored = (policy.sources[id] ?? {}) as Part
+    const fields = parts.find(source => source.id === id)?.policy?.fields.map(field => field.key) ?? []
+    return Object.fromEntries(Object.entries(stored).filter(([key]) => key === 'admission' || fields.includes(key)))
+  }
   const add = () => insert({ id: crypto.randomUUID(), name: '', enabled: true, instruction: '' }, policy.rules.length)
   return <form className="dt-form dt-block" onSubmit={event => { void draft.submit(event) }}
     onInvalidCapture={event => reveal(event.target)}>

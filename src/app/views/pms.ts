@@ -13,6 +13,7 @@ import { closedStatuses, journalsOf, listIssues, postNote, projectOf, readIssue 
 import { actorOf, agentNote, panelNote, panelNoteText, redmineChannel, redmineJournalPage, redminePage, SOURCE,
   type RedmineIssue } from '../../sources/redmine-trigger.ts'
 import type { Store } from '../store.ts'
+import { awaitingEval, ownersOf } from './records.ts'
 
 /**
  * Where a task stands in the agent's work: not judged yet, declined by the route, worked on, waiting for the person, or
@@ -39,7 +40,7 @@ export interface PmsTask {
   /** Why the route declined the task, by reason code; set when the state is `declined`. */
   reason?: string
   /** The ticket the agent holds for the task, with its stage, its change and its worker Session. */
-  ticket?: { id: string; title: string; stage: string; change?: number; session?: string }
+  ticket?: { id: string; title: string; stage: string; action?: string; change?: number; session?: string }
 }
 
 /** One message of a task's conversation: the issue description, or a note of its discussion. */
@@ -61,10 +62,16 @@ export interface PmsPipeline {
   taken: number
   /** Triggers that arrived in the last 24 hours. */
   arrived: number
-  /** Evals running right now. */
+  /** The Sources the Source status lists. */
+  sources: number
+  /** The Threads the Trigger list shows under its Subscribed filter. */
+  threads: number
+  /** Threads at the Eval stage: being evaluated now, or holding a Trigger that waits for a Decision. */
   evaluating: number
   /** Open tickets. */
   tickets: number
+  /** Open tickets the Executor is working on. */
+  working: number
   /** Open tickets waiting for a free worker slot. */
   queued: number
   /** Open tickets waiting for a person. */
@@ -124,7 +131,7 @@ const readable = (text: string): string => text
 
 /** The task system as the workbench names it: configured when the deployment has an account; connected when it answered. */
 const sourceOf = (account: RedmineAccount | undefined, connected: boolean, error?: string): SourceView =>
-  ({ name: account?.project ?? '', url: account?.baseUrl ?? '', configured: !!account, connected, ...error ? { error } : {} })
+  ({ name: account?.login ?? '', url: account?.baseUrl ?? '', configured: !!account, connected, ...error ? { error } : {} })
 
 /**
  * Reads the operator's inbox: every open issue assigned to the bound account, in every project, read live. When the task
@@ -154,7 +161,9 @@ function heldTickets(store: Store): Map<number, TicketView> {
     const issue = Number(trigger?.meta.issueId ?? NaN)
     if (!Number.isFinite(issue) || held.has(issue)) continue
     const change = changesOf(ticket, true).at(-1)
-    held.set(issue, { id: ticket.id, title: ticket.title, stage: ticketStage(ticket).stage, session: workerSessionId(ticket.id),
+    const stage = ticketStage(ticket)
+    held.set(issue, { id: ticket.id, title: ticket.title, stage: stage.stage,
+      ...('action' in stage ? { action: stage.action } : {}), session: workerSessionId(ticket.id),
       ...change === undefined ? {} : { change } })
   }
   return held
@@ -192,7 +201,7 @@ function taskOf(issue: RedmineIssue, account: RedmineAccount, held: Map<number, 
  * pipeline now. The task system is read live, so the list shows what is there now; when it cannot be reached the lists are
  * empty and the view says why. `running` is the number of workers the Executor has busy.
  */
-export async function pms(store: Store, commands: Commands, deployment: Deployment, running: number): Promise<PmsView> {
+export async function pms(store: Store, commands: Commands, deployment: Deployment, running: number, sources = 0): Promise<PmsView> {
   const inbox = await readInbox(commands, deployment)
   const held = heldTickets(store)
   const tasks: PmsTask[] = []
@@ -217,6 +226,14 @@ export async function pms(store: Store, commands: Commands, deployment: Deployme
   const since = new Date(Date.now() - day).toISOString()
   const arrived = Object.values(store.read.triggerStats(since)).reduce((sum, stats) => sum + stats.received, 0)
   const ended = store.tickets.list().filter(ticket => ticket.ended && Date.parse(ticket.ended.at ?? '') >= Date.now() - day)
+  // The Eval stage holds the Threads the Assessor is judging and the ones holding a Trigger that waits for a Decision:
+  // the same Threads the Trigger list shows under its 评估中 filter.
+  const owners = ownersOf(store)
+  const evaluating = store.threads.active()
+    .filter(thread => thread.evaluating || awaitingEval({ store, owners }, thread).length > 0).length
+  // The Threads the Trigger list shows: the ones subscribed to a Ticket that is still open.
+  const openIds = new Set(open.map(ticket => ticket.id))
+  const threads = store.read.subscribedThreads().filter(thread => thread.subscriptions.some(id => openIds.has(id))).length
   return {
     tasks,
     declined,
@@ -225,8 +242,11 @@ export async function pms(store: Store, commands: Commands, deployment: Deployme
       tasks: tasks.length,
       taken: tasks.filter(task => !!task.ticket).length,
       arrived,
-      evaluating: store.threads.active().filter(thread => thread.evaluating).length,
+      sources,
+      threads,
+      evaluating,
       tickets: open.length,
+      working: stages.filter(stage => stage.stage === 'working').length,
       queued: stages.filter(stage => stage.stage === 'working' && stage.action === 'queued').length,
       waiting: stages.filter(stage => stage.stage === 'person').length,
       idle: stages.filter(stage => stage.stage === 'idle').length,

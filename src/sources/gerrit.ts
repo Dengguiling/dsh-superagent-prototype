@@ -6,53 +6,54 @@ import { CliError, validItems, type Tally } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import { pause } from './poll.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
-import type { Localized, SourceKind } from './kind.ts'
+import { retired, type Localized, type SourceKind } from './kind.ts'
 import { changePage, commitMessage, gerritThreadContext, listChanges, listComments, readChange, type GerritChange } from './gerrit-read.ts'
 import { gerritLink, sendGerrit } from './gerrit-channel.ts'
 import { bindIssue, changesOf, observeChange } from './gerrit-change.ts'
 import { commentTrigger, issueOf, messageTrigger, SOURCE } from './gerrit-trigger.ts'
 
-const GerritConfigSchema = GerritAccountsSchema.extend({
+const GerritConfigSchema = retired(GerritAccountsSchema.extend({
   pollSeconds: z.number().int().min(10).max(3600).default(30),
   failuresBeforeError: z.number().int().min(1).max(20).default(3),
   observeComments: z.boolean().default(false),
   observeMessages: z.boolean().default(false),
   limit: z.number().int().min(1).max(500).default(100),
-}).strict()
+}).strict(), ['sshUrl', 'branch'])
 export type GerritConfig = z.infer<typeof GerritConfigSchema>
 const OBSERVED = { comment: 'observeComments', message: 'observeMessages' } as const
+/**
+ * The address the agent pushes patches to, derived from the web address: the same host on Gerrit's SSH port. The
+ * account and the key it uses come from the SSH setup of the machine, so nothing else has to be configured.
+ */
+export const sshAddress = (httpUrl: string): string => {
+  const host = /^https?:\/\/([^/:]+)/.exec(httpUrl.trim())?.[1] ?? ''
+  return host ? `ssh://${host}:29418` : ''
+}
 type Scope = keyof typeof OBSERVED
 /** The receiving scope of a Gerrit Trigger: a review comment, or a change message. */
 const scopeOf = (meta: Record<string, unknown>): Scope => meta.kind === 'message' ? 'message' : 'comment'
 
 export const gerritKind: SourceKind<GerritConfig> = {
   kind: SOURCE,
+  order: 2,
   title: { zh: 'Gerrit', en: 'Gerrit' },
   description: { zh: '代码评审系统；不论仓库，跟踪提交信息带 Redmine 任务号的开放变更，接收它们上面的评审意见与变更消息，智能体在这里答复评审。',
     en: 'The code review server; wherever a change lives, it tracks the open changes whose commit message names a Redmine task and receives their review comments and change messages, where the agent answers reviewers.' },
   schema: GerritConfigSchema,
   fields: [
-    { key: 'httpUrl', type: 'text', label: { zh: 'Gerrit 地址', en: 'Gerrit address' },
-      hint: { zh: '评审系统的 HTTP 地址，例如 http://gerrit.example.com:8080。保存时检查账号，然后重启 dsh-superagent。',
-        en: 'The HTTP address of the review server, such as http://gerrit.example.com:8080. Saving checks the account, then restarts dsh-superagent.' } },
-    { key: 'sshUrl', type: 'text', label: { zh: '推送用的 SSH 地址', en: 'SSH address for pushes' },
-      hint: { zh: '智能体推送补丁的地址，例如 ssh://agent@gerrit.example.com:29418；补丁推到 refs/for/<分支>。',
-        en: 'The address the agent pushes patches to, such as ssh://agent@gerrit.example.com:29418; patches go to refs/for/<branch>.' } },
-    { key: 'project', type: 'text', label: { zh: '项目（可选）', en: 'Project (optional)' },
-      hint: { zh: '留空时跟踪所有仓库里提交信息带 Redmine 任务号（如 Issue: #12）的变更；填写时只跟踪这个项目，兼容旧的单仓库设置。',
-        en: 'Empty tracks the changes of every repository whose commit message names a Redmine task, such as Issue: #12; a name narrows tracking to that one project, the legacy single-repository setting.' } },
-    { key: 'user', type: 'text', label: { zh: '绑定的 Gerrit 账号', en: 'The bound Gerrit account' },
+    { key: 'httpUrl', type: 'text', label: { zh: '网页地址', en: 'Web address' },
+      hint: { zh: '评审系统的 HTTP 地址，例如 http://gerrit.example.com:8080。推送用的 SSH 地址由它推导（ssh://<主机>:29418），读取评审意见用的 HTTP 凭据放在环境变量 DSH_SUPERAGENT_GERRIT_TOKEN 里。保存时检查账号，然后重启 dsh-superagent。',
+        en: 'The HTTP address of the review server, such as http://gerrit.example.com:8080. The SSH address the agent pushes to follows from it (ssh://<host>:29418), and the HTTP credential the review comments are read with belongs in the environment variable DSH_SUPERAGENT_GERRIT_TOKEN. Saving checks the account, then restarts dsh-superagent.' } },
+    { key: 'user', type: 'text', label: { zh: '账号', en: 'Account' },
       hint: { zh: 'Gerrit 上的用户名；智能体用它推送补丁，它名下的变更算工单自己的补丁。',
         en: 'The user name on Gerrit; the agent pushes patches as this account, and a change it owns is the ticket\'s own patch.' } },
-    { key: 'password', type: 'text', label: { zh: 'HTTP 密码', en: 'HTTP password' },
-      hint: { zh: 'Gerrit 账号的 HTTP 密码，用于读取评审意见；这是凭据，不会进入智能体的运行环境。',
-        en: 'The HTTP password of the Gerrit account, used to read review comments; it is a credential and never reaches the agent environment.' } },
+    { key: 'email', type: 'text', label: { zh: '邮箱', en: 'Email' },
+      hint: { zh: 'Gerrit 接受的提交邮箱；gerrit 没有身份时，提示词要求按它署名提交。', en: 'The commit email Gerrit accepts; git has no identity here, so commits are made as the instructions name.' } },
     { key: 'keyPath', type: 'text', label: { zh: 'SSH 私钥', en: 'SSH private key' },
       hint: { zh: '推送补丁用的私钥路径；公钥要注册在 Gerrit 账号上。', en: 'The path of the private key used to push patches; its public key must be registered with the Gerrit account.' } },
-    { key: 'email', type: 'text', label: { zh: '提交邮箱', en: 'Commit email' },
-      hint: { zh: 'Gerrit 接受的提交邮箱；gerrit 没有身份时，提示词要求按它署名提交。', en: 'The commit email Gerrit accepts; git has no identity here, so commits are made as the instructions name.' } },
-    { key: 'branch', type: 'text', label: { zh: '目标分支', en: 'Target branch' },
-      hint: { zh: '补丁推送到的分支，如 main；推送到 refs/for/<分支>。', en: 'The branch patches are pushed to, such as main; they go to refs/for/<branch>.' } },
+    { key: 'project', type: 'text', advanced: true, label: { zh: '项目（可选）', en: 'Project (optional)' },
+      hint: { zh: '留空时跟踪所有仓库里提交信息带 Redmine 任务号（如 Issue: #12）的变更；填写时只跟踪这个项目，兼容旧的单仓库设置。',
+        en: 'Empty tracks the changes of every repository whose commit message names a Redmine task, such as Issue: #12; a name narrows tracking to that one project, the legacy single-repository setting.' } },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 10, max: 3600, label: { zh: '轮询间隔 / 秒', en: 'Polling interval / seconds' } },
     { key: 'failuresBeforeError', type: 'number', advanced: true, min: 1, max: 20, label: { zh: '连续失败几次后报告异常', en: 'Failed polls before reporting an error' } },
     { key: 'observeComments', type: 'switch', label: { zh: '接收没有 @ 智能体的评审意见', en: 'Receive review comments that do not mention the agent' },
@@ -75,19 +76,20 @@ export const gerritKind: SourceKind<GerritConfig> = {
     return { threads: number ? [`${SOURCE}:${number}`] : [], terms: [] }
   },
   policy: {
-    schema: z.object({
-      allowed: z.array(z.object({ id: z.string().min(1), name: z.string().trim().max(100).optional() }).strict()).default([]),
-    }).strict(),
-    fields: [{ key: 'allowed', type: 'rows', label: { zh: '能发起工作的 Gerrit 账号', en: 'Gerrit accounts that may originate work' },
-      columns: [{ key: 'id', type: 'text', label: { zh: '账号', en: 'Account' } },
-        { key: 'name', type: 'text', label: { zh: '名字', en: 'Name' }, optional: true }] }],
-    explicit: { zh: '名单里的 Gerrit 账号在评审意见里 @ 智能体的账号。', en: 'A Gerrit account on the list mentions the agent\'s account in a review comment.' },
+    relation: true,
+    schema: retired(z.object({}).strict(), ['allowed']),
+    // No form fields: a relation Source keeps no sender list. The retired `allowed` is dropped, not refused, on save.
+    fields: [],
+    explicit: { zh: '智能体自己变更上的评审意见总是明确的请求；不设名单，评审人是谁都可以。',
+      en: 'A review comment on one of the agent\'s own changes is always an explicit request; no list is kept, any reviewer may originate work.' },
     rows(stored) {
-      const config = GerritConfigSchema.partial().parse(stored)
-      const note = (observed: boolean | undefined) => observed ? { zh: '全部', en: 'All' } : { zh: '仅 @', en: '@ only' }
-      const row = (id: Scope, label: { zh: string; en: string }) => ({ id, label, note: note(config[OBSERVED[id]]),
-        cells: { listedUnaddressed: !!config[OBSERVED[id]], unlistedAddressed: true, unlistedUnaddressed: !!config[OBSERVED[id]] } })
-      return [row('comment', { zh: '评审意见', en: 'Review comments' }), row('message', { zh: '变更消息', en: 'Change messages' })]
+      const config = GerritConfigSchema.parse(stored)
+      // The note says when the scope is received into the table: everything observed, otherwise only what speaks to the agent.
+      const row = (id: Scope, label: { zh: string; en: string }, quiet: { zh: string; en: string }) => ({ id, label,
+        note: config[OBSERVED[id]] ? { zh: '全部', en: 'All' } : quiet,
+        cells: { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: !!config[OBSERVED[id]] } })
+      return [row('comment', { zh: '评审意见', en: 'Review comments' }, { zh: '仅自己变更上的', en: 'Own change only' }),
+        row('message', { zh: '变更消息', en: 'Change messages' }, { zh: '不接收', en: 'Not received' })]
     },
   },
   environment: {
@@ -97,7 +99,7 @@ export const gerritKind: SourceKind<GerritConfig> = {
       { key: 'DSH_SUPERAGENT_GERRIT_HTTP_URL', description: { zh: '评审系统的 HTTP 地址。', en: 'The HTTP address of the review server.' } },
       { key: 'DSH_SUPERAGENT_GERRIT_PROJECT', description: { zh: '工单所在的仓库：事务的项目，或变更的项目；设置里指定了项目时按设置。',
         en: 'The ticket\'s repository: the issue\'s project, or the change\'s project; a configured project overrides it.' } },
-      { key: 'DSH_SUPERAGENT_GERRIT_BRANCH', description: { zh: '补丁推送到的分支。', en: 'The branch patches are pushed to.' } },
+      { key: 'DSH_SUPERAGENT_GERRIT_BRANCH', description: { zh: '补丁推送到的分支；空时用仓库的默认分支。', en: 'The branch patches are pushed to; empty means the default branch of the repository.' } },
       { key: 'DSH_SUPERAGENT_GERRIT_USER', description: { zh: '绑定的 Gerrit 账号；没有署名要求时按它提交。', en: 'The bound Gerrit account; commit as it when no author is named.' } },
       { key: 'DSH_SUPERAGENT_GERRIT_EMAIL', description: { zh: 'Gerrit 接受的提交邮箱。', en: 'The commit email Gerrit accepts.' } },
       { key: 'DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER', description: { zh: '接下工单的变更编号。', en: 'The number of the change that started the ticket.' } },
@@ -110,10 +112,12 @@ export const gerritKind: SourceKind<GerritConfig> = {
       // The project names the repository the ticket works in: a configured project is the legacy single-repository
       // override, otherwise a Redmine Trigger's issue project or a Gerrit Trigger's change project names it.
       const project = account?.project || config.project || String(trigger?.meta.project ?? '')
-      const ssh = account?.sshUrl ?? config.sshUrl
-      const branch = account?.branch ?? config.branch
+      // The SSH address follows from the web address, and the branch from the change the ticket works on: every
+      // repository has its own branches, so the deployment does not name one.
+      const ssh = sshAddress(http)
+      const branch = trigger?.source === SOURCE ? String(trigger.meta.branch ?? '') : ''
       return { DSH_SUPERAGENT_GERRIT_SSH_URL: ssh ? `${ssh.replace(/\/+$/, '')}/${project}` : '',
-        DSH_SUPERAGENT_GERRIT_PUSH_REF: `refs/for/${branch}`, DSH_SUPERAGENT_GERRIT_HTTP_URL: http,
+        DSH_SUPERAGENT_GERRIT_HTTP_URL: http,
         DSH_SUPERAGENT_GERRIT_PROJECT: project, DSH_SUPERAGENT_GERRIT_BRANCH: branch,
         DSH_SUPERAGENT_GERRIT_USER: account?.user ?? config.user, DSH_SUPERAGENT_GERRIT_EMAIL: account?.email ?? config.email,
         DSH_SUPERAGENT_GERRIT_CHANGE_NUMBER: number ? String(number) : '',

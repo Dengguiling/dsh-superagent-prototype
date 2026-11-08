@@ -105,7 +105,7 @@ function setupView(runtime: HttpHost) {
   return {
     machine: machineView(runtime.machine), problem: runtime.setupProblem ?? null, feishuProblem: runtime.feishuProblem ?? null,
     accounts: resolved ? { agent: resolved.gerrit?.user ?? resolved.redmine?.login ?? '', feishu: resolved.feishu ? { appId: resolved.feishu.appId, brand: resolved.feishu.brand, botId: resolved.feishu.botId, name: resolved.feishu.name } : null,
-      redmine: resolved.redmine ? { login: resolved.redmine.login, project: resolved.redmine.project } : null,
+      redmine: resolved.redmine ? { login: resolved.redmine.login } : null,
       gerrit: resolved.gerrit ? { user: resolved.gerrit.user, project: resolved.gerrit.project } : null } : null,
   }
 }
@@ -145,7 +145,8 @@ interface Input<K extends keyof Api> {
 type Routes = { [K in keyof Api]: (input: Input<K>) => ApiResponse<K> | Promise<ApiResponse<K>> }
 const offset = z.coerce.number().int().nonnegative().catch(0)
 const limit = (fallback: number, max: number) => z.coerce.number().int().positive().catch(fallback).transform(value => Math.min(max, value))
-const TicketsQuery = z.object({ state: z.enum(TICKET_FILTERS).catch('open'), offset, limit: limit(20, 1000) })
+const TicketsQuery = z.object({ state: z.enum(TICKET_FILTERS).catch('open'), window: z.literal('24h').optional().catch(undefined), offset,
+  limit: limit(20, 1000) })
 const ThreadsQuery = z.object({ filter: z.enum(THREAD_FILTERS).catch('subscribed'), offset, limit: limit(20, 1000) })
 const ThreadQuery = z.object({ limit: limit(50, 100), before: z.string().optional(), around: z.string().optional() })
 const DecisionsQuery = z.object({ kind: z.string().default(''), window: z.literal('24h').optional().catch(undefined), offset,
@@ -170,7 +171,8 @@ function routes(runtime: HttpHost): Routes {
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
-    'GET pms': () => pms(runtime.store, runtime.commands, runtime.deployment, runtime.executor.activeCount()),
+    'GET pms': () => pms(runtime.store, runtime.commands, runtime.deployment, runtime.executor.activeCount(),
+      runtime.sources.instances().length),
     'GET pms/:id': async ({ params }) => {
       const detail = await pmsTask(runtime.store, runtime.commands, runtime.deployment, task(params.id))
       if (!detail) throw new RouteError(404, 'Task not found')
@@ -224,8 +226,9 @@ function routes(runtime: HttpHost): Routes {
     },
     'POST decisions/:id/dismiss': ({ params }) => { runtime.engine.dismiss(params.id); return { dismissed: true } },
     'GET tickets': ({ query }) => {
-      const { state, offset, limit } = TicketsQuery.parse(query)
-      return ticketList(views(runtime), state, offset, limit)
+      const { state, window, offset, limit } = TicketsQuery.parse(query)
+      const since = window ? new Date(Date.now() - 86_400_000).toISOString() : ''
+      return ticketList(views(runtime), state, offset, limit, since)
     },
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },

@@ -43,7 +43,9 @@ export class SourceRegistry implements SourceScope {
   kind(id: string): SourceKind | undefined { return this.kinds.get(id) }
   /** Every registered kind's instance ordered by ID, followed by stored instances whose kind is not installed (with their config kept as stored). */
   instances(settings = this.settings()): (SourceInstance & { installed: boolean })[] {
-    const installed = [...this.kinds.values()].sort((a, b) => a.kind.localeCompare(b.kind)).map(kind => ({ ...this.resolve(kind, settings.sources[kind.kind]), installed: true }))
+    // The kinds stand in the order they declare: the main input first, the rest by their ID.
+    const installed = [...this.kinds.values()].sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.kind.localeCompare(b.kind))
+      .map(kind => ({ ...this.resolve(kind, settings.sources[kind.kind]), installed: true }))
     const orphaned = Object.entries(settings.sources).filter(([id]) => !this.kinds.has(id)).map(([id, stored]) => ({ id, kind: id, enabled: stored.enabled, config: stored.config, installed: false }))
     return [...installed, ...orphaned]
   }
@@ -57,12 +59,12 @@ export class SourceRegistry implements SourceScope {
     return { enabled: value.enabled, config: kind.schema.parse(value.config) }
   }
   /** Validates each Source's part of a submitted Policy against its kind; policy parts for uninstalled Source kinds are kept as stored. */
-  validatePolicy(parts: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown> & { allowed: { id: string; name?: string }[] }> {
+  validatePolicy(parts: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
     return Object.fromEntries(Object.entries(parts).map(([id, part]) => {
       const policy = this.kinds.get(id)?.policy
       // `admission` is validated by the Policy's own schema (shared across all kinds), while the kind validates the rest of its part.
       const { admission, ...rest } = part
-      return [id, policy ? { ...policy.schema.parse(rest), admission: AdmissionTableSchema.parse(admission ?? {}) } : part as Record<string, unknown> & { allowed: { id: string; name?: string }[] }]
+      return [id, policy ? { ...policy.schema.parse(rest), admission: AdmissionTableSchema.parse(admission ?? {}) } : part]
     }))
   }
   policyPart(id: string, settings = this.settings()) {
@@ -128,7 +130,10 @@ export class SourceRegistry implements SourceScope {
     if (!kind) return stored ? { listened: false, reason: 'source_not_installed' } : { listened: true, observed: false }
     const instance = this.resolve(kind, stored)
     if (!instance.enabled) return { listened: false, reason: 'source_disabled' }
-    return kind.scope ? kind.scope({ meta: input.meta }, instance.config) : { listened: true, observed: false }
+    const result: ScopeResult = kind.scope ? kind.scope({ meta: input.meta }, instance.config) : { listened: true, observed: false }
+    if (!result.listened) return result
+    // A kind that admits by relation carries the flag on every scope it listens to, so the Policy can drop the list checks.
+    return { ...result, relation: kind.policy?.relation === true }
   }
   /** Falls back to schema defaults and disables the instance when stored configuration fails validation. */
   private resolve(kind: SourceKind, stored: { enabled: boolean; config: Record<string, unknown> } | undefined): SourceInstance {

@@ -62,7 +62,6 @@ describe('setup', () => {
     await needs('redmine', 'redmineApiKeyUnset', {}, { baseUrl: 'http://redmine.test' })
     const gerrit = (code: string, config: Record<string, unknown>, values: Record<string, unknown> = {}) =>
       expect(resolveGerrit(machine(), config)).rejects.toEqual(setupError('gerrit', code, values))
-    await gerrit('gerritUrlUnset', { sshUrl: 'ssh://agent@gerrit.test:29418' })
     expect(() => executable('nothing-here', join(dir, 'bin'))).toThrow('nothing-here is not an executable file on PATH')
   })
   it('reads the Redmine account with its API key, or refuses a wrong one', async () => {
@@ -70,8 +69,8 @@ describe('setup', () => {
     // An empty configuration means the Source is not used.
     expect(await resolveRedmine(machine(), {})).toBeUndefined()
     answer({ user: { id: 5, login: 'agent', firstname: 'Agent', lastname: 'Bot', mail: 'agent@example.com' } })
-    expect(await resolveRedmine(machine(), { baseUrl: 'http://redmine.test/', apiKey: 'key', project: 'demo' }))
-      .toEqual({ baseUrl: 'http://redmine.test', apiKey: 'key', id: 5, login: 'agent', name: 'Agent Bot', mail: 'agent@example.com', project: 'demo' })
+    expect(await resolveRedmine(machine(), { baseUrl: 'http://redmine.test/', apiKey: 'key' }))
+      .toEqual({ baseUrl: 'http://redmine.test', apiKey: 'key', id: 5, login: 'agent', name: 'Agent Bot', mail: 'agent@example.com' })
     answer({}, 401)
     await expect(resolveRedmine(machine(), { baseUrl: 'http://redmine.test', apiKey: 'key' })).rejects.toEqual(setupError('redmine', 'redmineApiKeyRefused', { url: 'http://redmine.test' }))
     answer({})
@@ -87,13 +86,13 @@ describe('setup', () => {
     expect(await resolveGerrit(machine(), {})).toBeUndefined()
     // A named project is the legacy single-repository override, and is checked for existence.
     server()
-    expect(await resolveGerrit(machine(), { httpUrl: 'http://gerrit.test:8080/', project: 'demo', user: 'agent', password: 'secret', branch: 'main' }))
-      .toEqual({ httpUrl: 'http://gerrit.test:8080', sshUrl: '', project: 'demo', user: 'agent', password: 'secret', keyPath: '', branch: 'main', email: 'agent@example.com' })
+    expect(await resolveGerrit(machine(), { httpUrl: 'http://gerrit.test:8080/', project: 'demo', user: 'agent', password: 'secret' }))
+      .toEqual({ httpUrl: 'http://gerrit.test:8080', project: 'demo', user: 'agent', password: 'secret', keyPath: '', email: 'agent@example.com' })
     // Empty tracks every repository: the account check verifies the credentials and the address, and the project stays empty.
     const fetch = server()
     fetch.mockClear()
-    expect(await resolveGerrit(machine(), { httpUrl: 'http://gerrit.test:8080', user: 'agent', password: 'secret', branch: 'main' }))
-      .toEqual({ httpUrl: 'http://gerrit.test:8080', sshUrl: '', project: '', user: 'agent', password: 'secret', keyPath: '', branch: 'main', email: 'agent@example.com' })
+    expect(await resolveGerrit(machine(), { httpUrl: 'http://gerrit.test:8080', user: 'agent', password: 'secret' }))
+      .toEqual({ httpUrl: 'http://gerrit.test:8080', project: '', user: 'agent', password: 'secret', keyPath: '', email: 'agent@example.com' })
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(['http://gerrit.test:8080/a/accounts/self'])
     // A named project that does not exist is still refused, and a refused account is named where it is fixed.
     answer({})

@@ -12,10 +12,13 @@ export const testMachine = (overrides: Partial<Machine> = {}): Machine => ({
   admissionContextTimeoutMs: reference(15000), ...overrides,
 })
 /** The Redmine account of a fixture: a task system at `http://redmine.test` with the API key `key`. */
-export const testRedmine = { baseUrl: 'http://redmine.test', apiKey: 'key', id: 5, login: 'agent', name: 'Agent Bot', mail: 'agent@example.com', project: 'demo' }
-/** The Gerrit account of a fixture: a review server at `http://gerrit.test:8080` reached over SSH as `agent`. */
-export const testGerrit = { httpUrl: 'http://gerrit.test:8080', sshUrl: 'ssh://agent@gerrit.test:29418', project: 'demo', user: 'agent',
-  password: 'secret', keyPath: '/keys/agent', branch: 'main', email: 'agent@example.com' }
+export const testRedmine = { baseUrl: 'http://redmine.test', apiKey: 'key', id: 5, login: 'agent', name: 'Agent Bot', mail: 'agent@example.com' }
+/**
+ * The Gerrit account of a fixture: a review server at `http://gerrit.test:8080`, reached over SSH at the address that
+ * follows from it, as `agent`.
+ */
+export const testGerrit = { httpUrl: 'http://gerrit.test:8080', project: 'demo', user: 'agent',
+  password: 'secret', keyPath: '/keys/agent', email: 'agent@example.com' }
 /** The deployment of a fixture: the task system, the review server, and an optional bot. */
 export const testDeployment = (overrides: Partial<Deployment> = {}): Deployment => ({
   ...testMachine(), feishu: { cli: '/bin/false', botId: 'ou_bot', appId: 'cli_bot', brand: 'feishu', name: 'Widgets Bot' }, ...overrides,

@@ -1,13 +1,15 @@
-/** Overview page: the live dashboard of the pipeline, the Tickets needing a person, and the system problems. */
+/**
+ * The system problems: what is wrong with the service right now, each with the step that fixes it. They belong to the
+ * flow of the work — a Source that is down or an Eval that never decided stops the pipeline — so the pipeline page shows
+ * them below the chart.
+ */
 import type { ReactNode } from 'react'
-import { usePoll, type Problem } from './api.ts'
+import type { Problem } from './api.ts'
 import { Button, Icon } from './controls.tsx'
-import { LiveDashboard } from './dashboard.tsx'
-import { useAction, usePanel } from './provider.tsx'
+import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { setupPage, settingsRoute, type Route } from './route.ts'
-import { TicketLine } from './rows.tsx'
 import { healthText, localized, reasonLabel, valueLabel, readableMarkers } from './text.ts'
-import { CheckSetupButton, ConfirmButton, Hint, LoadState, Section, SetupMessage } from './widgets.tsx'
+import { CheckSetupButton, ConfirmButton, Hint, Section, SetupMessage } from './widgets.tsx'
 
 function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () => Promise<void> }) {
   const { t, call, navigate } = usePanel()
@@ -58,23 +60,13 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
   }
 }
 
-export function OverviewPage() {
-  const { t, call } = usePanel()
-  const { data, error, reload } = usePoll(() => call('GET overview'), [])
-  const dashboard = usePoll(() => call('GET pms'), [])
-  if (!data) return <LoadState error={error} loading />
-  return <>
-    {error && <LoadState error={error} loading={false} />}
-    {dashboard.data ? <LiveDashboard data={dashboard.data} />
-      : <Hint>{dashboard.error?.message ?? t('loading')}</Hint>}
-    <Section title={t('pendingTickets')} count={data.person.length}>
-      {data.person.length ? <ul className="dt-list dt-cards">{data.person.map(ticket => <TicketLine key={ticket.id} ticket={ticket} question
-        onChanged={reload} />)}</ul>
-        : <Hint>{t('needsYouNone')}</Hint>}
-    </Section>
-    {data.problems.length > 0 && <Section title={t('problems')} count={data.problems.length}>
-      <ul className="dt-list dt-cards">{data.problems.map((problem, index) => <ProblemLine key={index} problem={problem}
-        onChanged={reload} />)}</ul>
-    </Section>}
-  </>
+/** The system problems, with the step that fixes each one. */
+export function SystemProblems() {
+  const { t } = usePanel()
+  const { overview, reloadOverview } = usePanelData()
+  if (!overview?.problems.length) return null
+  return <Section title={t('problems')} count={overview.problems.length}>
+    <ul className="dt-list dt-cards">{overview.problems.map((problem, index) => <ProblemLine key={index} problem={problem}
+      onChanged={reloadOverview} />)}</ul>
+  </Section>
 }

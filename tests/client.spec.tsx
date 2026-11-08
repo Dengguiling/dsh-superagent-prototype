@@ -36,7 +36,8 @@ async function render(entry: Entry, props: Record<string, unknown>) {
   return { container, dispose: () => { act(() => { root.unmount() }); container.remove() } }
 }
 const openMaster = async (container: HTMLElement) => {
-  const button = [...container.querySelectorAll('button')].find(item => item.textContent === zh.openMaster)!
+  const button = [...container.querySelectorAll('button')]
+    .find(item => item.textContent === zh.openMaster || item.getAttribute('aria-label') === zh.openMaster)!
   await act(async () => { button.click() })
   for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }

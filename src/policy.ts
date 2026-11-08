@@ -1,6 +1,7 @@
 /**
  * Runtime settings schemas, assessment validation, and policy gate evaluation.
- * Who may originate work is configured per Source in that Source's own identities; the Policy never maps a person across Sources.
+ * Who may originate work is configured per Source in that Source's own terms: a listed Source keeps its senders in
+ * `allowed`, and a relation Source keeps no list — a message addressed to the agent is an explicit request from anyone.
  */
 import { LIMITS } from './limits.ts'
 import { z } from 'zod'
@@ -190,11 +191,13 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
     version, paused: settings.paused, evalTimeoutMs: settings.eval.timeoutSeconds * 1000,
     gate(trigger: Trigger, thread, tickets) {
       if (!trigger.human) return machineGate(trigger)
-      const allowed = allowedSender(settings, trigger.actor)
       const scope = listened(sources, trigger.source, trigger.meta)
+      // A relation Source keeps no list: whatever speaks to the agent is an explicit request from anyone.
+      const relation = scope.listened && !!scope.relation
+      const allowed = relation ? undefined : allowedSender(settings, trigger.actor)
       const row = scope.listened ? scope.row : undefined
       const recorded = { source: trigger.source, scope: trigger.meta, ...row === undefined ? {} : { row }, ...allowed ? { sender: senderName(allowed) } : {} }
-      if (allowed && trigger.addressed) return { admissible: true, strength: 'explicit', basis: { ...recorded, via: 'addressed', addressed: trigger.addressed } }
+      if (trigger.addressed && (allowed || relation)) return { admissible: true, strength: 'explicit', basis: { ...recorded, via: 'addressed', addressed: trigger.addressed } }
       const cell = admissionCell(!!allowed, !!trigger.addressed)!
       // Unaddressed messages only use the admission table when the Source observes all messages in that scope.
       const receivable = !!trigger.addressed || (scope.listened && scope.observed)
@@ -207,7 +210,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
         return { admissible: true, strength: allowed ? 'explicit' : 'inferred', basis: { ...recorded, via: 'followup' } }
       }
       if (admission === 'inferred' && mode !== 'off') return { admissible: true, strength: 'inferred', basis: { ...basis, observation: { mode } } }
-      return { admissible: false, reason: !allowed ? 'not_a_member' : receivable && admission === 'ignore' ? 'admission_ignored' : 'no_mention' }
+      return { admissible: false, reason: !allowed && !relation ? 'not_a_member' : receivable && admission === 'ignore' ? 'admission_ignored' : 'no_mention' }
     },
     admitsInferred: rules => mode === 'auto' && rules.length > 0 && rules.every(id => settings.policy.rules.some(rule => rule.enabled && rule.id === id)),
     revalidate(mandate: Mandate) {
@@ -221,19 +224,20 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
       if (basis.via === 'followup') return mandate.strength === 'explicit' || (mode === 'auto' && rulesOn(basis.rules))
       // A bot's candidate holds only while the bot remains on its Source's bot list and passes the observation checks below.
       if (basis.via === 'bot' && !listedBot(settings, mandate.actor)) return false
-      // An admission-table Mandate holds while the sender's current cell still grants at least the original strength.
+      // A relation Source keeps no list, so its Mandates never depend on one; a listed Source's sender must still be listed.
+      const relation = current?.listened === true && current.relation === true
       if (basis.via === 'admission') {
         const { cell } = basis
         const listed = !!allowedSender(settings, mandate.actor)
-        // A listed sender who addresses the agent is always explicit and uses no table cell.
-        if (cell === 'unlistedAddressed' && listed) return true
+        // A listed sender who addresses the agent is always explicit and uses no table cell, and so is anyone on a relation Source.
+        if (cell === 'unlistedAddressed' && (listed || relation)) return true
         // A sender added to the allowed list since acceptance moves to the listed cell, and still undergoes observation checks below.
         const now = cell === 'unlistedUnaddressed' && listed ? 'listedUnaddressed' : cell
         if (now === 'listedUnaddressed' && !listed) return false
         const admission = admissionOf(settings, source ?? '', current?.listened ? current.row : undefined, now)
         if (STRENGTH[admission] < STRENGTH[mandate.strength]) return false
         if (mandate.strength === 'explicit') return true
-      } else if (basis.via !== 'bot' && !allowedSender(settings, mandate.actor)) return false
+      } else if (basis.via !== 'bot' && !relation && !allowedSender(settings, mandate.actor)) return false
       // Observed/inferred Mandates hold only while auto mode is active and all matched rules remain enabled.
       if ((basis.via === 'admission' || basis.via === 'listed' || basis.via === 'bot') && basis.observation) return mode === 'auto' && rulesOn(basis.rules)
       return true

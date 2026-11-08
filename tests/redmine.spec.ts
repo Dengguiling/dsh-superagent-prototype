@@ -52,7 +52,7 @@ function host(overrides: Partial<SourceContextDeps> = {}) {
   const store = new Store(join(directory, 'db.sqlite'))
   store.saveSettings(SettingsSchema.parse({
     policy: { sources: { redmine: { allowed: [{ id: ALICE, name: 'Alice' }] } } }, eval: { mode: 'auto' },
-    sources: { redmine: { enabled: true, config: { baseUrl: BASE, apiKey: 'key', login: AGENT, project: 'demo' } } },
+    sources: { redmine: { enabled: true, config: { baseUrl: BASE, apiKey: 'key' } } },
   }))
   const board = new HealthBoard()
   const sources = new SourceRegistry(() => store.settings(), board)
@@ -95,6 +95,13 @@ describe('the Redmine translation', () => {
     expect(issueTrigger(issue(7, { description: 'Hey @agent, look at this.' }) as never, AGENT_ID, BASE).addressed).toBe('mention')
     expect(issueTrigger(issue(7, { assigned_to: user(5, AGENT) }) as never, AGENT_ID, BASE).addressed).toBe('direct')
     expect(issueTrigger(issue(7, { assigned_to: user(5, AGENT) }) as never, { id: 0, login: 'other' }, BASE).addressed).toBeUndefined()
+  })
+  it('marks a journal that reassigns the issue to the agent as addressed to it directly, whoever writes it', () => {
+    const reassigned = journal(13, { notes: 'Back to the agent.', details: [{ property: 'attr', name: 'assigned_to_id', old_value: '3', new_value: 5 }] })
+    expect(journalTrigger(issue(7) as never, reassigned as never, AGENT_ID, BASE)?.addressed).toBe('direct')
+    expect(journalTrigger(issue(7) as never, journal(13, { details: [{ property: 'attr', name: 'status_id', old_value: '1', new_value: '2' }] }) as never,
+      AGENT_ID, BASE)?.addressed).toBeUndefined()
+    expect(journalTrigger(issue(7) as never, reassigned as never, { id: 9, login: 'other' }, BASE)?.addressed).toBeUndefined()
   })
   it('builds a Trigger for a journal, and none for a note either the agent or the panel wrote', () => {
     const item = issue(7, { journals: [journal(11)] }) as never
@@ -141,7 +148,8 @@ describe('a Redmine polling round', () => {
     expect(h.store.get(KV.redmine.since)).toBeTruthy()
     expect(calls[0]!.url).toContain('/issues.json?')
     expect(calls[0]!.url).toContain('updated_on')
-    expect(calls[0]!.url).toContain('project_id=demo')
+    // The Source watches every project the account can see, so it asks for no project in particular.
+    expect(calls[0]!.url).not.toContain('project_id')
     expect(h.commands.deployment.redmine?.apiKey).toBe('key')
     h.store.close()
   })
@@ -249,29 +257,32 @@ describe('the Redmine channel', () => {
 })
 
 describe('the Redmine Source kind', () => {
-  it('listens to every issue of the project and observes only what the operator switched on', () => {
-    const config = redmineKind.schema.parse({ baseUrl: BASE, apiKey: 'key', login: AGENT, project: 'demo' })
+  it('listens to every issue of every visible project and observes only what the operator switched on', () => {
+    const config = redmineKind.schema.parse({ baseUrl: BASE, apiKey: 'key' })
     expect(redmineKind.scope?.({ meta: { kind: 'issue' } }, config)).toEqual({ listened: true, observed: false, row: 'issue' })
     expect(redmineKind.scope?.({ meta: { kind: 'journal' } }, config)).toEqual({ listened: true, observed: false, row: 'journal' })
     const observed = redmineKind.schema.parse({ baseUrl: BASE, apiKey: 'key', observeIssues: true, observeJournals: true })
     expect(redmineKind.scope?.({ meta: { kind: 'journal' } }, observed)).toEqual({ listened: true, observed: true, row: 'journal' })
   })
-  it('names the people who may originate work, and the rows of its admission table', () => {
+  it('keeps no sender list, admits by relation, and shows the rows of its admission table', () => {
     const policy = redmineKind.policy!
-    expect(policy.schema.parse({}).allowed).toEqual([])
+    expect(policy.relation).toBe(true)
+    expect(policy.fields).toEqual([])
+    expect(policy.schema.parse({ allowed: [{ id: 'Alice' }] })).toEqual({})
     const rows = policy.rows!({ baseUrl: BASE, apiKey: 'key', observeIssues: true })
     expect(rows.map(row => row.id)).toEqual(['issue', 'journal'])
-    expect(rows[0]!.cells.unlistedAddressed).toBe(true)
-    expect(rows[0]!.cells.listedUnaddressed).toBe(true)
-    expect(rows[1]!.cells.listedUnaddressed).toBe(false)
+    expect(rows[0]!.cells.unlistedUnaddressed).toBe(true)
+    expect(rows[0]!.cells.unlistedAddressed).toBe(false)
+    expect(rows[0]!.cells.listedUnaddressed).toBe(false)
+    expect(rows[1]!.cells.unlistedUnaddressed).toBe(false)
   })
-  it('names the project of the issue that started the ticket, not the watched project', () => {
-    const config = redmineKind.schema.parse({ baseUrl: BASE, apiKey: 'key', project: 'demo' })
+  it('names the project of the issue that started the ticket', () => {
+    const config = redmineKind.schema.parse({ baseUrl: BASE, apiKey: 'key' })
     const trigger = issueTrigger(issue(7, { project: { id: 2, identifier: 'sdk', name: 'Demo SDK' } }) as never, AGENT_ID, BASE)
     const values = redmineKind.environment!.values
     expect(values({ deployment: testDeployment({ redmine: testRedmine }), config, trigger }).DSH_SUPERAGENT_REDMINE_PROJECT).toBe('sdk')
-    // A Trigger without an issue of its own keeps the watched project.
-    expect(values({ deployment: testDeployment({ redmine: testRedmine }), config }).DSH_SUPERAGENT_REDMINE_PROJECT).toBe('demo')
+    // A Trigger without an issue of its own names no project.
+    expect(values({ deployment: testDeployment({ redmine: testRedmine }), config }).DSH_SUPERAGENT_REDMINE_PROJECT).toBe('')
   })
   it('registers the kind, reports that it waits for setup, and unregisters it again', async () => {
     const board = new HealthBoard()

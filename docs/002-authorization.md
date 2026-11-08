@@ -1,16 +1,22 @@
 # 002 Authorization
 
-Authorization determines who may start work and what that work may include. This document builds on [001 Domain model](001-domain.md).
+Authorization determines what may start work and what that work may include. This document builds on [001 Domain model](001-domain.md).
 
-The host enforces allowed lists, rules and Mandates. Messages, comments and quoted documents are inputs to a decision; they cannot change those permissions.
+The host enforces rules, Mandates, and each Source's admission. Messages, comments and quoted documents are inputs to a decision; they cannot change those permissions.
+
+A Source admits senders in one of two ways:
+
+- **By relation** — Redmine and Gerrit keep no sender list. Whatever speaks to the agent there is an explicit request from anyone: an issue assigned to it, a `@mention` of its account, or a review comment on one of its own changes. The admission table governs only what does not speak to the agent.
+- **By list** — Feishu keeps the senders who may originate work. A listed person who addresses the agent makes an explicit request; anyone else needs an admission cell or an existing Thread.
 
 ## Two paths for a Trigger
 
 ### Eval: deciding whether to start work
 
-The Source records whether a message addresses the agent: `mention` for a mention of the bot or agent account, and `direct` for a direct message. The gate checks the sender and the Source's Policy:
+The Source records whether a message addresses the agent: `mention` for a mention of the bot or agent account, and `direct` for a direct message, an assignment, or a review comment on the agent's own change. The gate checks the sender and the Source's Policy:
 
-- An allowed person who addresses the agent makes an explicit request.
+- On a relation Source, whoever addresses the agent makes an explicit request.
+- A listed person who addresses the agent makes an explicit request.
 - A person's follow-up on a Thread with Tickets follows the rules below.
 - Other human messages use the admission table for their receiving scope.
 - A bot on the Source's bot list can produce an inferred candidate, never an explicit request. Other bots are not admitted.
@@ -47,7 +53,7 @@ Human messages that reach no Ticket, including Threads whose Tickets were stoppe
 
 | Strength | Cases |
 | --- | --- |
-| explicit | A person on the list addresses the agent, or follows up on a Thread that already has a Ticket; a cell of the admission table set to explicit request |
+| explicit | Whoever addresses the agent on a relation Source; a listed person who addresses the agent; a follow-up on a Thread that already has a Ticket from a listed person; a cell of the admission table set to explicit request |
 | inferred | A person not on the list follows up on a Thread with a Ticket, unless their cell of the admission table is explicit; a cell of the admission table set to inferred candidate; a message of a bot on the Source's bot list that addresses the agent or arrives where the Source receives every message |
 | not admitted | Any other bot's message, everything the admission table ignores, and every inferred case while the accept mode is `off` |
 
@@ -61,7 +67,7 @@ Each Source's Policy has an admission table. Its rows are receiving scopes:
 - **Redmine:** new issues, and the discussion under them.
 - **Gerrit:** review comments on the agent's changes, and the change messages that record a merge or an abandonment.
 
-A row has up to three cells. Each cell decides whether a message becomes an explicit request, an inferred candidate or nothing:
+A row of a listed Source has up to three cells. Each cell decides whether a message becomes an explicit request, an inferred candidate or nothing:
 
 | Cell | Choices | Default |
 | --- | --- | --- |
@@ -69,7 +75,13 @@ A row has up to three cells. Each cell decides whether a message becomes an expl
 | Not on the list, addressing the agent | explicit, inferred, ignore | ignore |
 | Not on the list, not addressing the agent | inferred, ignore | ignore |
 
-Cells for unaddressed messages are available only where the Source receives every message, such as a Feishu chat set to **全部消息** or a Redmine or Gerrit scope with its receive-all switch enabled. A change message records a machine event and carries no request, so its row offers only the last cell. Bot messages use the bot list instead of these cells.
+A relation Source collapses the table to one cell per row, for the messages that do not speak to the agent:
+
+| Cell | Choices | Default |
+| --- | --- | --- |
+| Not addressing the agent | inferred, ignore | ignore |
+
+The spoke-to side of the row needs no cell: on Redmine an issue assigned to the agent, a `@mention` of its account, or a journal that reassigns the issue to it is an explicit request from whoever wrote it, and on Gerrit a review comment on one of its own changes is the same regardless of the reviewer. Cells for unaddressed messages are available only where the Source receives every message, such as a Feishu chat set to **全部消息** or a Redmine or Gerrit scope with its receive-all switch enabled. A change message records a machine event and carries no request, so its row offers only the last cell. Bot messages use the bot list instead of these cells.
 
 Setting the unlisted-addressed cell to explicit lets anyone in that scope request work by mentioning the agent. This can be useful for a dedicated support chat. Inferred candidates still depend on the accept mode. Follow-ups normally bypass this table, except that an explicit cell still grants explicit strength.
 
@@ -135,9 +147,9 @@ The Source must still listen to the original Thread. The remaining checks depend
 
 - An explicit follow-up Mandate passes.
 - An inferred Mandate needs `auto` mode and its matched rules still enabled.
-- A Mandate admitted by a table cell must still receive at least its original strength under today's table and sender membership. Removing a sender from the list can therefore revoke a Mandate accepted through the listed-sender cell.
+- A Mandate admitted by a table cell must still receive at least its original strength under today's table and sender membership. Removing a sender from the list can therefore revoke a Mandate accepted through the listed-sender cell. A Mandate of a relation Source never depends on a list, because the Source keeps none.
 - A bot's Mandate requires that bot to remain on the Source's bot list. Inferred table and bot Mandates also need `auto` mode and enabled matched rules.
-- Other Mandates require the sender to remain on the Source's allowed list.
+- The other Mandates require the sender to remain on the Source's allowed list.
 
 If revalidation fails, the Ticket stays ended and takes none of its waiting messages. Each message is treated as having reached no Ticket; if no other Ticket owns it, it goes to Eval. The main Session is not told it reached a worker. This also applies after a processing pause. Attaching to the Ticket is refused, and further work requires a new accept.
 

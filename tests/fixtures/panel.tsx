@@ -51,6 +51,31 @@ export function find(name: string, selector = CONTROLS): HTMLElement {
   return match
 }
 export const tab = (name: string) => find(name, '[role="tab"]')
+/**
+ * Opens a page of the panel: the group it belongs to first. The flow group has one page, so its sections are reached
+ * the way an operator reaches them: through the command palette, which lists every one of them.
+ */
+export async function openPage(dictionary: Record<string, string>, page: string) {
+  const group = page === 'settings' ? 'settings' : page === 'inbox' || page === 'pms' ? 'inbox' : 'pipeline'
+  const groupTab = tab(dictionary[`tab.group.${group}`]!)
+  if (groupTab.getAttribute('aria-selected') !== 'true') await click(groupTab)
+  if (page === 'pipeline' || page === 'pms' || page === 'settings') return
+  // The route already names this page: opening it again would drop what the page shows, such as the record it holds.
+  const current = JSON.parse(sessionStorage.getItem('dsh-superagent/route') ?? '{}') as { route?: { page?: string } }
+  if (current.route?.page === page) return
+  // The sections of the flow page are reached the way an operator reaches them: through the command palette.
+  await press('k', { metaKey: true })
+  await type(document.querySelector<HTMLInputElement>('.dt-palette input')!, dictionary[`tab.${page}`]!)
+  await press('Enter')
+}
+/** Presses a key on whatever holds the focus, the way the operator does. */
+export async function press(key: string, options: KeyboardEventInit = {}) {
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown',
+      { key, bubbles: true, cancelable: true, ...options }))
+  })
+  await settle()
+}
 export async function click(target: string | HTMLElement) {
   const element = typeof target === 'string' ? find(target) : target
   await act(async () => { element.click() })

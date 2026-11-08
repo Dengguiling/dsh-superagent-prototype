@@ -48,8 +48,8 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
   const problems = [
     ...(setup ? [{ kind: 'setup' as const, ...setup }] : []),
     ...(running.length ? [] : [{ kind: 'no-source' as const }]),
-    // Only allowed senders can originate work, so empty allowlists mean no request can ever become a ticket.
-    ...(anyoneAllowed(settings) ? [] : [{ kind: 'no-allowed' as const }]),
+    // A relation Source originates work without a list; only when none is running and every list is empty can nothing become a ticket.
+    ...(running.some(source => sources.kind(source.id)?.policy?.relation) || anyoneAllowed(settings) ? [] : [{ kind: 'no-allowed' as const }]),
     ...running.flatMap(source => source.health.filter(item => item.state === 'error').map(item => ({ kind: 'source-error' as const, source: { id: source.id, title: source.title, health: item } }))),
     ...(settings.paused ? [{ kind: 'executor-paused' as const }] : []),
     // Unavailable Evals behind the `evals` health entry are listed individually as `eval-unavailable` below.
@@ -70,6 +70,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
   const judgement = store.read.flow(since)
   return {
     problems,
+    paused: settings.paused,
     person: open.filter(ticket => ticketStage(ticket).stage === 'person').map(ticket => ticketRow(view, ticket)),
     executor: { ...load, maxWorkers: settings.executor.maxWorkers, idle: open.filter(ticket => ticketStage(ticket).stage === 'idle').length },
     flow: { received, filtered, triggers: received - filtered, judged: judgement.judged, accepted: judgement.accepted,

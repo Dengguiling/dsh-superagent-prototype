@@ -21,14 +21,16 @@ const probe: SourceKind<{ interval: number }> = {
 }
 
 describe('Source registry', () => {
-  it('lists every installed kind with defaults, in id order, followed by stored instances whose kind is not installed', () => {
+  it('lists every installed kind with defaults, in the order the kinds declare, followed by stored instances whose kind is not installed',
+    () => {
     const settings = SettingsSchema.parse({ sources: { probe: { enabled: false, config: { interval: 9 } }, retired: { enabled: true, config: { x: 1 } } } })
     const sources = new SourceRegistry(() => settings)
     sources.register(probe); sources.register(redmineKind)
+    // Redmine declares an order, so it stands before the kinds that do not.
     expect(sources.instances()).toEqual([
-      { id: 'probe', kind: 'probe', enabled: false, config: { interval: 9 }, installed: true },
-      { id: 'redmine', kind: 'redmine', enabled: true, config: { baseUrl: '', apiKey: '', project: '', login: '', pollSeconds: 30,
+      { id: 'redmine', kind: 'redmine', enabled: true, config: { baseUrl: '', apiKey: '', pollSeconds: 30,
         failuresBeforeError: 3, pageSize: 100, observeIssues: false, observeJournals: false }, installed: true },
+      { id: 'probe', kind: 'probe', enabled: false, config: { interval: 9 }, installed: true },
       { id: 'retired', kind: 'retired', enabled: true, config: { x: 1 }, installed: false },
     ])
   })
@@ -131,8 +133,11 @@ describe('Source registry', () => {
     expect(sources.validatePolicy({ feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }] }, retired: { allowed: [], x: 1 } }))
       .toEqual({ feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }], syncChat: '', admission: {} }, retired: { allowed: [], x: 1 } })
     expect(() => sources.validatePolicy({ feishu: { allowed: [{ id: 'alice' }] } })).toThrow()
+    // A relation Source keeps no list: validating its part drops a retired `allowed` instead of refusing it.
+    expect(sources.validatePolicy({ redmine: { allowed: [{ id: 'Alice' }], admission: {} } }))
+      .toEqual({ redmine: { admission: {} } })
     expect(sources.policyPart('feishu')).toEqual({ allowed: [{ id: 'ou_alice' }], syncChat: '', admission: {} })
-    expect(sources.policyPart('redmine')).toEqual({ allowed: [], admission: {} })
+    expect(sources.policyPart('redmine')).toEqual({ admission: {} })
     sources.register(probe)
     expect(sources.policyPart('probe')).toBeUndefined()
   })

@@ -122,6 +122,7 @@ export function saveBarText(t: T, { phase, sent, notice }: DraftState<unknown, u
     case 'rebasing': return { status: t('saveRebasing') }
   }
   if (phase === 'awaitingRevision') return { status: t(sent?.restarting ? 'savedRestarting' : 'saved') }
+  if (phase === 'saving') return { status: t('saving') }
   return { status: phase === 'clean' ? t('saved') : words.editing ?? t(notice?.kind === 'restored' ? 'draftRestored' : 'draftKept') }
 }
 
@@ -134,7 +135,7 @@ export interface DraftOptions<V> {
 }
 /** Manage a settings draft, persisting unsaved edits in `sessionStorage` and rebasing them when newer server revisions arrive. */
 export function useDraft<V, M = undefined>({ key, saved, revision, save, reload }: DraftOptions<V>) {
-  const { restart } = usePanel()
+  const { restart, markDraft } = usePanel()
   const [state, dispatch] = useReducer(draftReducer<V, M>, undefined, () => {
     const stored = read<V, M>(key)
     const initial: DraftState<V, M> = stored ? { phase: 'editing', draft: stored, notice: { kind: 'restored' } } : { phase: 'clean' }
@@ -146,6 +147,9 @@ export function useDraft<V, M = undefined>({ key, saved, revision, save, reload 
     try { if (state.draft) sessionStorage.setItem(key, JSON.stringify(state.draft)); else sessionStorage.removeItem(key) }
     catch (failure) { dispatch({ type: 'refused', notice: { kind: 'unstored', error: errorText(failure) } }) }
   }, [key, state.draft])
+  // The navigation marks the page that holds an unsaved draft, so leaving it does not hide the change.
+  const dirty = state.draft !== undefined
+  useEffect(() => { markDraft(key, dirty) }, [key, dirty, markDraft])
   const failed = (failure: unknown) => dispatch({ type: 'refused', notice: { kind: 'failed', error: errorText(failure) } })
   const submit = async (event?: FormEvent) => {
     event?.preventDefault()
@@ -167,7 +171,7 @@ export function useDraft<V, M = undefined>({ key, saved, revision, save, reload 
     if (result.restarting) restart(); else await reload().catch(failed)
   }
   return { state, value: state.sent?.value ?? state.draft?.value ?? saved, meta: state.draft?.meta,
-    revision: state.draft?.revision ?? revision ?? 0, dirty: state.draft !== undefined,
+    revision: state.draft?.revision ?? revision ?? 0, dirty,
     busy: state.phase === 'saving' || state.phase === 'awaitingRevision', submit,
     edit: (value: V, meta?: M) => dispatch({ type: 'edit', value, meta, saved, revision }), discard: () => dispatch({ type: 'discard' }) }
 }

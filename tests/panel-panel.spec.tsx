@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
-import { usePanel, mount, remount, settle, all, click, type, text, field } from './fixtures/panel.tsx'
+import { usePanel, mount, remount, settle, all, click, type, text, field, openPage } from './fixtures/panel.tsx'
 import { server, found } from './fixtures/panel-server.ts'
 
 usePanel()
@@ -38,6 +38,7 @@ it('explains what can be searched when nothing matches', async () => {
 
 it('returns to the exact page after a remount of the main panel', async () => {
   await mount()
+  await openPage(zh, 'execution')
   await click('修复回归')
   await remount()
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe('修复回归')
@@ -45,7 +46,7 @@ it('returns to the exact page after a remount of the main panel', async () => {
 
 it('shows domain terms in the interface language only and lists both languages in the (?) glossary', async () => {
   await mount(en)
-  expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['Overview', 'Workbench', 'Source', 'Trigger', 'Eval', 'Execution', 'Settings'])
+  expect(all('.dt-grouptabs [role="tab"]').map(tab => tab.textContent)).toEqual(['Task workbench', 'Pipeline', 'Settings'])
   await click('Glossary')
   const dialog = document.querySelector('[role="dialog"]')!
   const row = [...dialog.querySelectorAll('tr')].find(item => item.textContent?.startsWith('Ticket'))!

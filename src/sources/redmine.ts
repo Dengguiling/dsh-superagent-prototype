@@ -7,18 +7,18 @@ import { CliError, validItems, type Tally } from '../infra/commands.ts'
 import { KV } from '../kv.ts'
 import { cursorAt, pause } from './poll.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
-import type { Localized, SourceKind } from './kind.ts'
+import { retired, type Localized, type SourceKind } from './kind.ts'
 import { redmineLink, sendRedmine } from './redmine-channel.ts'
 import { journalsOf, listIssues, projectOf, readIssue, redmineThreadContext } from './redmine-read.ts'
 import { issueTrigger, journalTrigger, panelToken, SOURCE, type RedmineIssue } from './redmine-trigger.ts'
 
-const RedmineConfigSchema = RedmineAccountsSchema.extend({
+const RedmineConfigSchema = retired(RedmineAccountsSchema.extend({
   pollSeconds: z.number().int().min(10).max(3600).default(30),
   failuresBeforeError: z.number().int().min(1).max(20).default(3),
   pageSize: z.number().int().min(1).max(100).default(100),
   observeIssues: z.boolean().default(false),
   observeJournals: z.boolean().default(false),
-}).strict()
+}).strict(), ['login', 'project'])
 export type RedmineConfig = z.infer<typeof RedmineConfigSchema>
 const OBSERVED = { issue: 'observeIssues', journal: 'observeJournals' } as const
 type Scope = keyof typeof OBSERVED
@@ -27,6 +27,7 @@ const scopeOf = (meta: Record<string, unknown>): Scope => meta.kind === 'journal
 
 export const redmineKind: SourceKind<RedmineConfig> = {
   kind: SOURCE,
+  order: 1,
   title: { zh: 'Redmine', en: 'Redmine' },
   description: { zh: '任务系统（ PMS ）；接收事务与事务下的讨论，智能体在其中接单并把结果写回事务。',
     en: 'The task system (PMS); receives issues and their discussion, where the agent takes work and writes its result back to the issue.' },
@@ -38,11 +39,6 @@ export const redmineKind: SourceKind<RedmineConfig> = {
     { key: 'apiKey', type: 'text', label: { zh: 'API 密钥', en: 'API key' },
       hint: { zh: '智能体账号在 Redmine 的“我的账号”里的 API 访问密钥；这是凭据，不会进入智能体的运行环境。',
         en: 'The REST web services key of the agent account in Redmine; it is a credential and never reaches the agent environment.' } },
-    { key: 'login', type: 'text', label: { zh: '绑定的 Redmine 账号', en: 'The bound Redmine account' },
-      hint: { zh: '留空时用 API 密钥对应的账号。事务指派给它或 @ 它时，视为对它说话。',
-        en: 'Empty uses the account of the API key. An issue assigned to it or mentioning it addresses the agent.' } },
-    { key: 'project', type: 'text', label: { zh: '监听的项目', en: 'Watched project' },
-      hint: { zh: 'Redmine 项目的标识符，如 demo；留空表示全部可见项目。', en: 'The identifier of a Redmine project, such as demo; empty means every visible project.' } },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 10, max: 3600, label: { zh: '轮询间隔 / 秒', en: 'Polling interval / seconds' } },
     { key: 'failuresBeforeError', type: 'number', advanced: true, min: 1, max: 20, label: { zh: '连续失败几次后报告异常', en: 'Failed polls before reporting an error' } },
     { key: 'observeIssues', type: 'switch', label: { zh: '接收没有 @ 智能体的新事务', en: 'Receive new issues that do not mention the agent' },
@@ -66,21 +62,19 @@ export const redmineKind: SourceKind<RedmineConfig> = {
     return { threads: number ? [`${SOURCE}:${number}`] : [], terms: [] }
   },
   policy: {
-    schema: z.object({
-      allowed: z.array(z.object({ id: z.string().min(1), name: z.string().trim().max(100).optional() }).strict()).default([]),
-    }).strict(),
-    fields: [{ key: 'allowed', type: 'rows', label: { zh: '能发起工作的 Redmine 账号', en: 'Redmine accounts that may originate work' },
-      columns: [{ key: 'id', type: 'text', label: { zh: '名字', en: 'Name' } },
-        { key: 'name', type: 'text', label: { zh: '备注', en: 'Note' }, optional: true }] }],
-    explicit: { zh: '名单里的 Redmine 账号在事务里 @ 智能体的账号，或把事务指派给它。',
-      en: 'A Redmine account on the list mentions the agent\'s login in an issue, or assigns the issue to it.' },
-    // Redmine's API reports the display name of an author beside its id, and no login, so the list holds the names Redmine shows.
+    relation: true,
+    schema: retired(z.object({}).strict(), ['allowed']),
+    // No form fields: a relation Source keeps no sender list. The retired `allowed` is dropped, not refused, on save.
+    fields: [],
+    explicit: { zh: '任何 Redmine 账号把事务指派给智能体，或在事务或讨论里 @ 它的账号；不设名单，谁发起都可以。',
+      en: 'Any Redmine account assigns an issue to the agent, or mentions its login in an issue or its discussion; no list is kept, everyone may originate work.' },
+    // Redmine's API reports the display name of an author beside its id, and no login, so panels show the names Redmine shows.
     unnamed: { person: { zh: 'Redmine 账号', en: 'Redmine account' }, bot: { zh: 'Redmine 机器人', en: 'Redmine robot' } },
     rows(stored) {
-      const config = RedmineConfigSchema.partial().parse(stored)
+      const config = RedmineConfigSchema.parse(stored)
       const note = (observed: boolean | undefined) => observed ? { zh: '全部', en: 'All' } : { zh: '仅指派或 @', en: 'Assigned or @ only' }
       const row = (id: Scope, label: { zh: string; en: string }) => ({ id, label, note: note(config[OBSERVED[id]]),
-        cells: { listedUnaddressed: !!config[OBSERVED[id]], unlistedAddressed: true, unlistedUnaddressed: !!config[OBSERVED[id]] } })
+        cells: { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: !!config[OBSERVED[id]] } })
       return [row('issue', { zh: '新事务', en: 'New issues' }), row('journal', { zh: '事务下的讨论', en: 'Issue discussion' })]
     },
   },
@@ -94,11 +88,10 @@ export const redmineKind: SourceKind<RedmineConfig> = {
     ],
     values: ({ deployment, config, trigger }) => {
       const base = deployment.redmine?.baseUrl ?? config.baseUrl
-      const login = deployment.redmine?.login ?? config.login
+      const login = deployment.redmine?.login ?? ''
       const issue = trigger?.source === SOURCE ? Number(trigger.meta.issueId) || 0 : 0
-      // The project of the ticket is the project of the issue that started it, not the watched project; a Trigger without
-      // an issue of its own keeps the watched project.
-      const project = (trigger?.source === SOURCE ? String(trigger.meta.project ?? '') : '') || config.project
+      // The project of the ticket is the project of the issue that started it.
+      const project = trigger?.source === SOURCE ? String(trigger.meta.project ?? '') : ''
       return { DSH_SUPERAGENT_REDMINE_URL: base, DSH_SUPERAGENT_REDMINE_PROJECT: project,
         DSH_SUPERAGENT_REDMINE_ISSUE_ID: issue ? String(issue) : '',
         DSH_SUPERAGENT_REDMINE_ISSUE_URL: issue && base ? `${base.replace(/\/+$/, '')}/issues/${issue}` : '',
@@ -159,15 +152,15 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   const since = ctx.state.get(KV.redmine.since) ?? new Date().toISOString()
   if (ctx.state.get(KV.redmine.since) === undefined) ctx.state.set(KV.redmine.since, since)
   const tally: Tally = { skipped: 0 }
-  const changed = await listIssues(commands, { project: config.project, since, limit: config.pageSize }, tally)
+  const changed = await listIssues(commands, { since, limit: config.pageSize }, tally)
   // The work of the operator is the issues assigned to the bound account: they are read as well, so a task that was
   // assigned before the Source started is not left behind. An issue read already is skipped below.
-  const assigned = await listIssues(commands, { project: config.project, assignedTo: 'me', status: 'open', limit: config.pageSize }, tally)
+  const assigned = await listIssues(commands, { assignedTo: 'me', status: 'open', limit: config.pageSize }, tally)
   const issues = new Map<number, RedmineIssue>()
   for (const issue of [...assigned, ...changed]) issues.set(issue.id, issue)
   const account = ctx.deployment.redmine
   // The agent's identity in Redmine: the id its issues carry, and the login a person mentions it by.
-  const agent = { id: account?.id ?? 0, login: account?.login || config.login }
+  const agent = { id: account?.id ?? 0, login: account?.login ?? '' }
   const base = account?.baseUrl || config.baseUrl
   let triggers = 0
   let read = 0

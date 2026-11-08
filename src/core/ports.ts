@@ -6,8 +6,13 @@ import type { Reason } from './reasons.ts'
 /** Gate admission result: either inadmissible with a reason code, or admissible with strength and MandateBasis. */
 export type GateResult = { admissible: false; reason: string } | { admissible: true; strength: Strength; basis: MandateBasis }
 
-/** Whether a Source receives a Trigger; `observed` when it also receives messages not addressed to the agent, and `row` the receiving scope the Policy's admission table names, such as a chat. */
-export type ScopeResult = { listened: true; observed: boolean; row?: string } | { listened: false; reason: string }
+/**
+ * Whether a Source receives a Trigger; `observed` when it also receives messages not addressed to the agent, and `row`
+ * the receiving scope the Policy's admission table names, such as a chat. `relation` when the Source admits senders by
+ * relation instead of a list: whatever speaks to the agent — an assignment, a mention, a review comment on its own
+ * change — is an explicit request from anyone, and the admission table governs only what does not speak to it.
+ */
+export type ScopeResult = { listened: true; observed: boolean; row?: string; relation?: boolean } | { listened: false; reason: string }
 /** Source configuration as the domain sees it: listening scope per trigger or per recorded Mandate basis. */
 export interface SourceScope {
   scope(input: { source: string; meta: Record<string, unknown> }): ScopeResult

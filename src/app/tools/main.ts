@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople }
   from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
+import { AllowedSchema } from '../../policy.ts'
 import { AssessmentSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
 import { ticketCard } from '../cards.ts'
 import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
@@ -269,7 +270,7 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       schema: z.object({ source: z.string() }).strict(),
       execute: async args => {
         const before = host.store.settings().policy.sources[args.source]?.allowed ?? []
-        const after = (await host.settings.sync(args.source)).allowed
+        const after = z.array(AllowedSchema).catch([]).parse((await host.settings.sync(args.source)).allowed)
         const names = (from: typeof after, without: typeof after) => from.filter(item => !without.some(other => other.id === item.id))
           .map(item => item.name ?? item.id)
         return { source: args.source, allowed: after.length, added: names(after, before), removed: names(before, after) }

@@ -8,9 +8,10 @@ import type { ConfigPageForm } from '@deepseek-ai/dsh-client-ui-plugin-manager/c
 import { LIMITS } from '../limits.ts'
 import type { SetupView } from './api.ts'
 import { InfoTip, Input } from './controls.tsx'
-import { SaveBar, useDraft } from './draft.tsx'
+import { SaveBar, useDraft, type DraftWords } from './draft.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
 import { Field, Fields } from './settings-kit.tsx'
+import type { DshSuperagentKey } from './locales.ts'
 import { setupText, type T } from './text.ts'
 import { CheckSetupButton, Hint, KeyValues, Section, SetupMessage } from './widgets.tsx'
 
@@ -19,6 +20,12 @@ type Op = Parameters<ConfigPageForm['mutate']>[0][number]
 
 const MACHINE_LIMITS = ['promptMaxChars', 'admissionContextMaxPages', 'admissionContextTimeoutMs'] as const
 type Limits = Record<typeof MACHINE_LIMITS[number], string>
+/** The label of each limit, so a conflict names the setting that collided. */
+const LIMIT_LABELS: Record<typeof MACHINE_LIMITS[number], DshSuperagentKey> = {
+  promptMaxChars: 'deploymentPromptMaxChars',
+  admissionContextMaxPages: 'deploymentContextPages',
+  admissionContextTimeoutMs: 'deploymentContextTimeout',
+}
 const text = (value: unknown): string => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 const limitsOf = (values: object | undefined): Limits =>
   Object.fromEntries(MACHINE_LIMITS.map(key => [key, text((values as Record<string, unknown> | undefined)?.[key])])) as Limits
@@ -34,8 +41,10 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
   const { t, notify } = usePanel()
   const snapshot = form?.state
   const editable = snapshot?.status === 'ready' && snapshot.writable
-  // Pass `revision` only while DSH serves writable values so a draft started before `ready` rebases once writable.
-  const draft = useDraft({ saved: limitsOf(editable ? snapshot.value : setup.machine), revision: editable ? snapshot.revision : undefined,
+  // The draft is keyed like every other one, so it survives a reload and both surfaces over this host configuration
+  // (the panel's Settings › Deployment and the Plugin Manager's page) share it.
+  const draft = useDraft({ key: 'dsh-superagent/draft/deployment', saved: limitsOf(editable ? snapshot.value : setup.machine),
+    revision: editable ? snapshot.revision : undefined,
     reload: async () => {},
     save: async (value, revision, base) => {
       const ops: Op[] = MACHINE_LIMITS.filter(key => value[key].trim() !== base[key].trim())
@@ -44,6 +53,9 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
       notify(t('saved'))
       return { revision: revision + 1, restarting: false }
     } })
+  // A conflict names the limits that collided, not just the fact that something did.
+  const words: DraftWords = { conflict: (revision, paths) => t('deploymentConflictParts', { revision,
+    parts: paths.map(([key]) => t(LIMIT_LABELS[key as typeof MACHINE_LIMITS[number]])).join(t('listSeparator')) }) }
   const accounts = setup.accounts
   // Remote browsers (`memory` mode) are read-only; `unavailable` indicates `dsh-superagent` is still starting.
   const readOnlyHint = !form ? t('deploymentNoForms') : snapshot?.mode === 'memory' ? t('deploymentReadOnly')
@@ -55,8 +67,8 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
   </Field>
   const feishu = accounts?.feishu ? accounts.feishu.name || accounts.feishu.botId
     : setup.feishuProblem ? setupText(t, setup.feishuProblem) : t('deploymentFeishuNone')
-  // Each Source reports the account the agent acts as; the project names the work it takes there.
-  const redmine = accounts?.redmine ? [accounts.redmine.login, accounts.redmine.project].filter(Boolean).join(' · ') : ''
+  // Each Source reports the account the agent acts as.
+  const redmine = accounts?.redmine?.login ?? ''
   const gerrit = accounts?.gerrit ? [accounts.gerrit.user, accounts.gerrit.project].filter(Boolean).join(' · ') : ''
   return <form className="dt-form" onSubmit={event => { void draft.submit(event) }}>
     <Fields disabled={draft.busy}>
@@ -82,7 +94,7 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
         {limit('admissionContextTimeoutMs', t('deploymentContextTimeout'))}
       </Section>
     </Fields>
-    {editable && <SaveBar {...draft} onDiscard={draft.discard} />}
+    {editable && <SaveBar {...draft} words={words} onDiscard={draft.discard} />}
   </form>
 }
 
@@ -97,5 +109,6 @@ function PluginPage({ form }: { form: DeploymentForm }) {
 }
 /** DSH Plugin Manager config view entry; renders nothing in `summary` mode because DSH displays the package description. */
 export function PluginConfig({ t, view, form }: { t: T; view: 'page' | 'summary'; form: DeploymentForm }) {
-  return view === 'page' ? <PanelProvider t={t} interval={10_000}><PluginPage form={form} /></PanelProvider> : null
+  // The Plugin Manager page reads the deployment, not the task system, so it does not poll Redmine.
+  return view === 'page' ? <PanelProvider t={t} interval={10_000} readTasks={false}><PluginPage form={form} /></PanelProvider> : null
 }

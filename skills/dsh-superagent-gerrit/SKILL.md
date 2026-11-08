@@ -44,7 +44,7 @@ Then four things make the push land as a reviewable change.
 4. Push to the review ref, not to a branch:
 
    ```sh
-   git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:$DSH_SUPERAGENT_GERRIT_PUSH_REF"
+   git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:refs/for/${DSH_SUPERAGENT_GERRIT_BRANCH:-$(git branch --show-current)}"
    ```
 
    The push output names the change: a `remote:` line carries `http://<host>/#/c/<project>/+/<number>`. Read that number; it is the change's identity.
@@ -59,7 +59,7 @@ A later patch set of the same change **amends** the commit; it never adds a seco
 git commit --amend -m "Fix the login redirect" \
   -m "Issue: $DSH_SUPERAGENT_REDMINE_ISSUE_ID" \
   -m "Change-Id: $CHANGE_ID"
-git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:$DSH_SUPERAGENT_GERRIT_PUSH_REF"
+git push --push-option="topic=agent/$DSH_SUPERAGENT_NAME" origin "agent/$DSH_SUPERAGENT_NAME:refs/for/${DSH_SUPERAGENT_GERRIT_BRANCH:-$(git branch --show-current)}"
 ```
 
 Keep the same `Change-Id` for every patch set of a change; the number of the change does not change. Read it back with `git log -1 --format=%B`.
