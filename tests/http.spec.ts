@@ -101,13 +101,13 @@ it('answers a prompt save that lost a race with 409, and a settings body over 12
 it('refuses a reply to an issue of another account, as the detail page refuses it', async () => {
   const issue = { id: 7, subject: 'Fix the login', description: 'It breaks.', project: { id: 1, identifier: 'sdk', name: 'SDK' },
     tracker: { id: 1, name: 'Bug' }, status: { id: 1, name: 'New' }, priority: { id: 2, name: 'Normal' },
-    author: { id: 1, name: 'Li Na' }, assigned_to: { id: 99, name: 'Someone Else' },
+    author: { id: 1, name: 'Team Leader' }, assigned_to: { id: 99, name: 'Someone Else' },
     created_on: '2026-11-04T00:00:00Z', updated_on: '2026-11-04T00:00:00Z' }
   const call = serve({
     store: { get: () => undefined, tickets: { list: () => [] } },
     commands: { redmine: { baseUrl: 'http://redmine.test', apiKey: 'key' },
       http: async () => ({ status: 200, body: JSON.stringify({ issue }) }) },
-    deployment: { redmine: { id: 5, login: 'dev', name: 'Zhang Wei', baseUrl: 'http://redmine.test', apiKey: 'key', project: '' } },
+    deployment: { redmine: { id: 5, login: 'dev', name: 'Software Developer', baseUrl: 'http://redmine.test', apiKey: 'key', project: '' } },
     receive: () => undefined,
   })
   expect(await call('POST', 'pms/7/reply', { text: 'On it.' })).toEqual({ status: 404, body: { error: 'Task not found' } })

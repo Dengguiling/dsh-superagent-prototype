@@ -20,8 +20,8 @@ The company has three roles, and both systems know them:
 | Role | Redmine | Gerrit |
 | --- | --- | --- |
 | `admin` — the system administrator | "System Administrator", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
-| `lead` — the leader | "Wang Lei", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
-| `dev` — the developer | "Zhang Wei", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
+| `lead` — the leader | "Team Leader", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
+| `dev` — the developer | "Software Developer", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
 
 The passwords, the API keys and the addresses of the local environment are in the `.env` of the repository `dsh-superagent-env`; its README describes the stack in full.
 
@@ -39,7 +39,7 @@ The passwords, the API keys and the addresses of the local environment are in th
 
 The superagent binds to the developer and to nobody else:
 
-- the Redmine account is `dev`, "Zhang Wei", and the Redmine Source takes the issues assigned to it;
+- the Redmine account is `dev`, "Software Developer", and the Redmine Source takes the issues assigned to it;
 - the Gerrit account is `dev`, and the SSH address of the Source is `ssh://dev@localhost:29418`;
 - there is no account of the agent's own, in neither system.
 
@@ -113,7 +113,7 @@ Under *Settings* → *Policy* → *Eval → On each Source*, the Redmine Source 
 
 | Source | The allowed entry | What it allows |
 | --- | --- | --- |
-| Redmine | `Wang Lei`, the display name Redmine shows | the issues and the journals of the leader start the work |
+| Redmine | `Team Leader`, the display name Redmine shows | the issues and the journals of the leader start the work |
 | Gerrit | `lead`, the user name Gerrit reports | the review comments of the leader start the follow-up work |
 
 Redmine's API reports the **display name** of an author beside its id, and no login, so the Redmine list holds the names Redmine shows. The Gerrit list holds the user names of Gerrit, which is what its API reports.

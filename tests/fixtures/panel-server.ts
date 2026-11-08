@@ -212,14 +212,14 @@ const overviewView = (): ApiResponse<'GET overview'> => {
 const pmsTask = (fields: ApiResponse<'GET pms'>['tasks'][number]): ApiResponse<'GET pms'>['tasks'][number] => fields
 /** The operator's assigned tasks of the default inbox: one the agent holds, one still open in the task system. */
 const PMS_TASKS = [
-  pmsTask({ id: 12, subject: 'SDK pagination skips the first page', status: 'New', priority: 'Normal', assignee: 'Zhang Wei', author: 'Li Na',
+  pmsTask({ id: 12, subject: 'SDK pagination skips the first page', status: 'New', priority: 'Normal', assignee: 'Software Developer', author: 'Team Leader',
     project: 'sdk', updated: '2026-11-05T09:00:00Z', url: 'http://redmine.test/issues/12',
     ticket: { id: 'ticket-1', title: 'Fix SDK pagination', stage: 'working', change: 1003, session: 'worker-ticket-1' } }),
-  pmsTask({ id: 13, subject: 'CLI --timeout is ignored', status: 'In Progress', priority: 'High', assignee: 'Zhang Wei', author: 'Li Na',
+  pmsTask({ id: 13, subject: 'CLI --timeout is ignored', status: 'In Progress', priority: 'High', assignee: 'Software Developer', author: 'Team Leader',
     project: 'sdk-cli', updated: '2026-11-05T10:00:00Z', url: 'http://redmine.test/issues/13' }),
 ]
 /** A task the operator archived: it stays in the inbox, in the archived filter only. */
-const PMS_ARCHIVED = [pmsTask({ id: 9, subject: 'Old demo issue', status: 'New', priority: 'Low', assignee: 'Zhang Wei', author: 'Li Na',
+const PMS_ARCHIVED = [pmsTask({ id: 9, subject: 'Old demo issue', status: 'New', priority: 'Low', assignee: 'Software Developer', author: 'Team Leader',
   project: 'demo', updated: '2026-11-03T09:00:00Z', url: 'http://redmine.test/issues/9', archivedAt: '2026-11-04T00:00:00Z' })]
 const PMS_SOURCE = (): ApiResponse<'GET pms'>['source'] => ({ name: 'demo', url: 'http://redmine.test', configured: true,
   // Nothing runs while the deployment check waits, so the task system does not answer yet.
@@ -237,13 +237,13 @@ const pmsMessage = (fields: ApiResponse<'GET pms/:id'>['messages'][number]) => f
 /** The conversations of the default inbox: the issue description, then the agent's, the operator's and others' notes. */
 const PMS_MESSAGES: Record<number, ApiResponse<'GET pms/:id'>['messages']> = {
   12: [
-    pmsMessage({ id: 'issue-12', at: '2026-11-04T09:00:00Z', role: 'other', name: 'Li Na', text: 'After the first page the SDK client returns page 1 again.\n\nSteps: iterate three pages of a 150-item collection.\n\nExpected: pages 1, 2 and 3. Actual: 1, 1, 2.', url: 'http://redmine.test/issues/12' }),
-    pmsMessage({ id: 'journal-41', at: '2026-11-04T10:00:00Z', role: 'agent', name: 'Zhang Wei', text: 'The cursor starts at `page * size` in `pagination.py`, so the first page repeats. I will push a patch with the off-by-one fixed.', url: 'http://redmine.test/issues/12#change-41' }),
-    pmsMessage({ id: 'journal-42', at: '2026-11-04T11:00:00Z', role: 'you', name: 'Zhang Wei', text: 'Please cover the retry policy in the tests too.', url: 'http://redmine.test/issues/12#change-42' }),
-    pmsMessage({ id: 'journal-43', at: '2026-11-04T12:00:00Z', role: 'other', name: 'Li Na', text: 'The customer is blocked on this; push it today.', url: 'http://redmine.test/issues/12#change-43' }),
+    pmsMessage({ id: 'issue-12', at: '2026-11-04T09:00:00Z', role: 'other', name: 'Team Leader', text: 'After the first page the SDK client returns page 1 again.\n\nSteps: iterate three pages of a 150-item collection.\n\nExpected: pages 1, 2 and 3. Actual: 1, 1, 2.', url: 'http://redmine.test/issues/12' }),
+    pmsMessage({ id: 'journal-41', at: '2026-11-04T10:00:00Z', role: 'agent', name: 'Software Developer', text: 'The cursor starts at `page * size` in `pagination.py`, so the first page repeats. I will push a patch with the off-by-one fixed.', url: 'http://redmine.test/issues/12#change-41' }),
+    pmsMessage({ id: 'journal-42', at: '2026-11-04T11:00:00Z', role: 'you', name: 'Software Developer', text: 'Please cover the retry policy in the tests too.', url: 'http://redmine.test/issues/12#change-42' }),
+    pmsMessage({ id: 'journal-43', at: '2026-11-04T12:00:00Z', role: 'other', name: 'Team Leader', text: 'The customer is blocked on this; push it today.', url: 'http://redmine.test/issues/12#change-43' }),
   ],
-  13: [pmsMessage({ id: 'issue-13', at: '2026-11-04T09:30:00Z', role: 'other', name: 'Li Na', text: '`sdk-cli run --timeout 5` still waits for the default 60 seconds.', url: 'http://redmine.test/issues/13' })],
-  9: [pmsMessage({ id: 'issue-9', at: '2026-11-02T09:00:00Z', role: 'other', name: 'Li Na', text: 'The old demo issue, kept for reference.', url: 'http://redmine.test/issues/9' })],
+  13: [pmsMessage({ id: 'issue-13', at: '2026-11-04T09:30:00Z', role: 'other', name: 'Team Leader', text: '`sdk-cli run --timeout 5` still waits for the default 60 seconds.', url: 'http://redmine.test/issues/13' })],
+  9: [pmsMessage({ id: 'issue-9', at: '2026-11-02T09:00:00Z', role: 'other', name: 'Team Leader', text: 'The old demo issue, kept for reference.', url: 'http://redmine.test/issues/9' })],
 }
 /** The default conversations: every task of the inbox, with the task as its detail view shows it. */
 const pmsTasks = (view = pmsView()): Record<number, ApiResponse<'GET pms/:id'>> =>

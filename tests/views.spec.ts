@@ -329,7 +329,7 @@ const inboxIssue = (id: number, fields: Record<string, unknown> = {}): Record<st
   id, subject: `Fix the login ${id}`, description: 'The login button does nothing.',
   project: { id: 1, identifier: 'sdk', name: 'Demo SDK' },
   tracker: { id: 1, name: 'Bug' }, status: { id: 1, name: 'New' }, priority: { id: 2, name: 'Normal' },
-  author: { id: 1, name: 'Li Na', login: 'li.na' }, assigned_to: { id: 5, name: 'Zhang Wei', login: 'dev' },
+  author: { id: 1, name: 'Team Leader', login: 'li.na' }, assigned_to: { id: 5, name: 'Software Developer', login: 'dev' },
   created_on: '2026-11-04T00:00:00Z', updated_on: INBOX_AT, ...fields,
 })
 /** A ticket of the fixture: held for the deployment's Redmine account, with no assignment yet. */
@@ -388,8 +388,8 @@ it('builds the task inbox from the issues assigned to the bound account, the ope
   // The inbox is the live read; the archived task leaves the list, the hidden one is gone, and the ticket is named with its change and Session.
   expect(view.tasks.map(task => task.id)).toEqual([7, 8])
   expect(view.archived.map(task => [task.id, task.archivedAt])).toEqual([[9, at]])
-  expect(view.tasks[0]).toMatchObject({ id: 7, subject: 'Fix the login 7', status: 'New', priority: 'Normal', assignee: 'Zhang Wei',
-    author: 'Li Na', project: 'sdk', updated: INBOX_AT, url: 'http://redmine.test/issues/7',
+  expect(view.tasks[0]).toMatchObject({ id: 7, subject: 'Fix the login 7', status: 'New', priority: 'Normal', assignee: 'Software Developer',
+    author: 'Team Leader', project: 'sdk', updated: INBOX_AT, url: 'http://redmine.test/issues/7',
     ticket: { id: 't-taken', title: 't-taken', stage: 'working', change: 1003, session: 'worker-t-taken' } })
   expect(view.tasks[1]).toMatchObject({ id: 8, project: 'sdk' })
   expect(view.tasks[1]).not.toHaveProperty('ticket')
@@ -411,15 +411,15 @@ it('builds the task inbox from the issues assigned to the bound account, the ope
 })
 
 it('reads a task\'s conversation: the description, then the notes with their markers stripped and their roles', async () => {
-  const journal = (id: number, notes: string, user: { id: number; name?: string } = { id: 1, name: 'Li Na' }) =>
+  const journal = (id: number, notes: string, user: { id: number; name?: string } = { id: 1, name: 'Team Leader' }) =>
     ({ id, notes, user, created_on: `2026-11-0${id - 10}T00:00:00Z` })
   const issue = inboxIssue(7, { journals: [
     journal(11, 'The retry tests need to pass too.'),
-    journal(12, 'Panel answer\n\n<!-- dsh-superagent-panel:6f0c -->', { id: 5, name: 'Zhang Wei' }),
-    journal(13, 'Patch is pushed\n\n<!-- dsh-superagent:reply-1 -->', { id: 5, name: 'Zhang Wei' }),
-    journal(14, 'Looks good.', { id: 5, name: 'Zhang Wei' }),
+    journal(12, 'Panel answer\n\n<!-- dsh-superagent-panel:6f0c -->', { id: 5, name: 'Software Developer' }),
+    journal(13, 'Patch is pushed\n\n<!-- dsh-superagent:reply-1 -->', { id: 5, name: 'Software Developer' }),
+    journal(14, 'Looks good.', { id: 5, name: 'Software Developer' }),
     // A field change without a note is not part of the conversation.
-    { id: 15, notes: '', user: { id: 5, name: 'Zhang Wei' }, details: [{ property: 'status_id', name: 'Status', old_value: '1', new_value: '2' }] },
+    { id: 15, notes: '', user: { id: 5, name: 'Software Developer' }, details: [{ property: 'status_id', name: 'Status', old_value: '1', new_value: '2' }] },
   ] })
   const { deployment, commands } = inboxCommands([issue], { '/issues/7.json': { status: 200, body: JSON.stringify({ issue }) } })
   const detail = await pmsTask(store, commands, deployment, 7)
@@ -427,11 +427,11 @@ it('reads a task\'s conversation: the description, then the notes with their mar
   expect(detail?.canReply).toBe(true)
   expect(detail?.source).toEqual({ name: 'demo', url: 'http://redmine.test', configured: true, connected: true })
   expect(detail?.messages.map(message => [message.role, message.name, message.text, message.url])).toEqual([
-    ['other', 'Li Na', 'The login button does nothing.', 'http://redmine.test/issues/7'],
-    ['other', 'Li Na', 'The retry tests need to pass too.', 'http://redmine.test/issues/7#change-11'],
-    ['you', 'Zhang Wei', 'Panel answer', 'http://redmine.test/issues/7#change-12'],
-    ['agent', 'Zhang Wei', 'Patch is pushed', 'http://redmine.test/issues/7#change-13'],
-    ['you', 'Zhang Wei', 'Looks good.', 'http://redmine.test/issues/7#change-14'],
+    ['other', 'Team Leader', 'The login button does nothing.', 'http://redmine.test/issues/7'],
+    ['other', 'Team Leader', 'The retry tests need to pass too.', 'http://redmine.test/issues/7#change-11'],
+    ['you', 'Software Developer', 'Panel answer', 'http://redmine.test/issues/7#change-12'],
+    ['agent', 'Software Developer', 'Patch is pushed', 'http://redmine.test/issues/7#change-13'],
+    ['you', 'Software Developer', 'Looks good.', 'http://redmine.test/issues/7#change-14'],
   ])
   // A task the operator hid, an issue assigned to someone else, and a missing issue are not tasks of the inbox.
   store.set(KV.pms.task(8), { deletedAt: at })
@@ -459,7 +459,7 @@ it('posts a panel reply as a marker note, then delivers it to the agent at once 
     if (init.method === 'PUT') { put.body = init.body; return { status: 204, body: '' } }
     return { status: 200, body: JSON.stringify({ issue }) }
   })
-  const deployment = testDeployment({ redmine: { ...testRedmine, name: 'Zhang Wei' } })
+  const deployment = testDeployment({ redmine: { ...testRedmine, name: 'Software Developer' } })
   const commands = new Commands(() => deployment, {}, new AbortController().signal)
   const receive = vi.fn()
   await pmsReply(store, commands, deployment, 7, 'On it.', receive)
@@ -472,7 +472,7 @@ it('posts a panel reply as a marker note, then delivers it to the agent at once 
   expect(receive.mock.calls[0]![0]).toMatchObject({ source: 'redmine', threads: [{ source: 'redmine', id: '7' }], human: true,
     addressed: 'direct', text: 'On it.', url: 'http://redmine.test/issues/7', channel: { source: 'redmine', thread: 'redmine:7',
       address: { issue: '7' } }, meta: { issueId: 7, project: 'sdk', kind: 'journal' } })
-  expect(receive.mock.calls[0]![0].actor).toEqual({ source: 'redmine', id: 'Zhang Wei' })
+  expect(receive.mock.calls[0]![0].actor).toEqual({ source: 'redmine', id: 'Software Developer' })
   // An issue assigned to someone else is still answered, but the note does not claim to address the agent.
   vi.spyOn(Commands.prototype, 'http').mockImplementation(async (url, init = {}) => init.method === 'PUT'
     ? { status: 204, body: '' } : { status: 200, body: JSON.stringify({ issue: inboxIssue(7, { assigned_to: null }) }) })
@@ -487,7 +487,7 @@ it('records the panel reply it handed to the agent, so the Source does not deliv
     if (init.method === 'PUT') { put.body = init.body; return { status: 204, body: '' } }
     return { status: 200, body: JSON.stringify({ issue }) }
   })
-  const deployment = testDeployment({ redmine: { ...testRedmine, name: 'Zhang Wei' } })
+  const deployment = testDeployment({ redmine: { ...testRedmine, name: 'Software Developer' } })
   const commands = new Commands(() => deployment, {}, new AbortController().signal)
   await pmsReply(store, commands, deployment, 7, 'On it.', vi.fn())
   // The token of the note is the key of the record that tells the Source the note was delivered.

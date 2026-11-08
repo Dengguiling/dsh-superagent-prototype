@@ -41,7 +41,7 @@ it('opens a task as its Redmine conversation, with the agent replies, the people
   // The issue description, the agent's reply, the operator's reply and the reporter's note, in that order.
   expect(all('.dt-chat-msg')).toHaveLength(4)
   expect(all('.dt-chat-msg').map(item => item.getAttribute('data-role'))).toEqual(['other', 'agent', 'you', 'other'])
-  expect(all('.dt-chat-author').map(item => item.textContent)).toEqual(['Li Na', zh.pmsAgent, zh.pmsYou, 'Li Na'])
+  expect(all('.dt-chat-author').map(item => item.textContent)).toEqual(['Team Leader', zh.pmsAgent, zh.pmsYou, 'Team Leader'])
   expect(all('.dt-chat-msg')[1]!.textContent).toContain('off-by-one')
   expect(all('.dt-chat-link').map(link => link.getAttribute('href'))).toContain('http://redmine.test/issues/12#change-41')
   // The ticket that works the task, its change and its session.
@@ -118,7 +118,7 @@ it('words the inbox in English when the panel speaks English', async () => {
   expect(document.querySelector('.dt-page-title h2')?.textContent).toBe(en.pmsTitle)
   expect(all('.dt-inbox-filters .dt-pill').map(item => item.textContent)).toEqual([`${en.pmsFilterActive}2`, `${en.pmsFilterArchived}1`])
   await openTask('SDK pagination skips the first page')
-  expect(all('.dt-chat-author').slice(0, 3).map(item => item.textContent)).toEqual(['Li Na', en.pmsAgent, en.pmsYou])
+  expect(all('.dt-chat-author').slice(0, 3).map(item => item.textContent)).toEqual(['Team Leader', en.pmsAgent, en.pmsYou])
   expect(composer()?.getAttribute('placeholder')).toBe(en.pmsReplyPlaceholder)
   expect(tab(en['tab.overview']).getAttribute('aria-selected')).toBe('false')
 })
