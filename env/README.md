@@ -124,6 +124,12 @@ and the person does not have to come back to it.
 docker compose up -d signin     # starts the sign-in page (port 3001)
 ```
 
+The sign-in is done on the canonical host of the environment, `localhost`: a
+cookie belongs to its host, and the review server redirects to its own
+canonical address. A person who opened the page under another name
+(`127.0.0.1:3001`) is sent to `localhost:3001` first, and the sign-in
+continues there.
+
 The page lists the two systems and, for each of them, the three roles of the
 environment — **administrator** (`admin`), **leader** (`lead`) and **developer**
 (`dev`) — and it shows which role is signed in for each system right now. A

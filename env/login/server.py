@@ -84,6 +84,8 @@ GERRIT_URL = setting("SIGNIN_GERRIT_URL", "http://localhost:8080").rstrip("/")
 # The address of the review server inside the compose network; the probe asks
 # Gerrit itself whether it recognises an account in the browser.
 GERRIT_INTERNAL = setting("SIGNIN_GERRIT_INTERNAL_URL", "http://gerrit:8080").rstrip("/")
+# The host the systems of the environment carry as their canonical one.
+CANONICAL_HOST = urllib.parse.urlparse(GERRIT_URL).hostname or "localhost"
 # ... and the ones the service uses inside the compose network
 REDMINE_INTERNAL = setting("SIGNIN_REDMINE_INTERNAL_URL", "http://redmine:3000").rstrip("/")
 
@@ -699,18 +701,19 @@ class SignIn(BaseHTTPRequestHandler):
 
     # -- the sign-in --------------------------------------------------------
 
-    def system_url(self, base):
-        """The address of a system, on the host the person used.
+    def canonical_url(self, path):
+        """This page on its canonical host, or None when it is already there.
 
-        A cookie belongs to its host, and the browser sends it to every port of
-        that host.  The sign-in therefore opens the system on the very host the
-        page was opened with, so the cookie of the sign-in is sent there.
+        A cookie belongs to its host.  The systems of the environment have
+        "localhost" as their canonical host, so the sign-in is done there: a
+        person who opened the page under another name is sent to the canonical
+        address first, and the cookie of the sign-in is sent to the systems.
         """
-        parsed = urllib.parse.urlparse(base)
         host = (self.headers.get("Host") or "").split(":")[0]
-        if not host:
-            return base
-        return f"{parsed.scheme}://{host}:{parsed.port}"
+        if not host or host == CANONICAL_HOST:
+            return None
+        port = (self.headers.get("Host") or "").partition(":")[2]
+        return f"http://{CANONICAL_HOST}:{port}{path}"
 
     def signin_gerrit(self, role):
         """Sign in at the review server.
@@ -731,8 +734,12 @@ class SignIn(BaseHTTPRequestHandler):
         browser = "Basic " + base64.b64encode(
             gerrit_credential(login, password, mail).encode()
         ).decode()
+        canonical = self.canonical_url(self.path)
+        if canonical:
+            self.redirect(canonical)
+            return
         self.redirect(
-            self.system_url(GERRIT_URL) + "/",
+            GERRIT_URL + "/",
             headers=[
                 (
                     "Set-Cookie",
@@ -765,8 +772,12 @@ class SignIn(BaseHTTPRequestHandler):
                 "/?error=" + urllib.parse.quote(f"Redmine refused the sign-in: {exc}")
             )
             return
+        canonical = self.canonical_url(self.path)
+        if canonical:
+            self.redirect(canonical)
+            return
         self.redirect(
-            self.system_url(REDMINE_URL) + "/",
+            REDMINE_URL + "/",
             headers=[
                 (
                     "Set-Cookie",
