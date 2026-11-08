@@ -58,7 +58,7 @@ The Redmine Source binds to one account. In a company that is the operator's own
 
 ### The accounts of the local environment
 
-The Docker Compose stack in `env/` runs this deployment locally. It carries the three roles of the company in both systems, and the superagent binds to the developer in both of them:
+The repository `dsh-superagent-env`, next to this one, holds a Docker Compose stack that runs this deployment locally. It carries the three roles of the company in both systems, and the superagent binds to the developer in both of them:
 
 | Role | Redmine, `http://localhost:3000` | Gerrit, `http://localhost:8080` |
 | --- | --- | --- |
@@ -66,26 +66,26 @@ The Docker Compose stack in `env/` runs this deployment locally. It carries the 
 | `lead` | "Wang Lei", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
 | `dev` | "Zhang Wei", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
 
-The passwords, the API keys and the addresses are in `env/.env`, which is the source of truth for the stack; `env/README.md` describes it in full.
+The passwords, the API keys and the addresses are in the `.env` of that repository, which is the source of truth for the stack; its README describes it in full.
 
-`env/accounts.sh` provisions the role system on a running stack, and it is idempotent: running it again only applies what is missing. `env/seed.sh` calls it before it seeds the projects and the issues.
+Its `accounts.sh` provisions the role system on a running stack, and it is idempotent: running it again only applies what is missing. Its `seed.sh` calls it before it seeds the projects and the issues.
 
 - The Redmine accounts come from the `redmine-init` job of the stack, because the Redmine REST API cannot create users. The script checks that each role exists and that its API key answers.
 - The `dev` account of the review server is created over the REST API, and it carries the SSH key of the superagent: a push over SSH needs nothing else.
 - The `lead` account of the review server is created by signing in over HTTP, with `curl -u <login>:<password> <address>/login`. Only that flow gives an account the external id `gerrit:<login>` that the HTTP authentication mode looks the user up by, so only that account works in the browser.
-- The groups `Developers` and `Reviewers` carry the rights of the roles. The REST API of Gerrit 2.15 cannot create groups, so `env/accounts.sh` creates them over SSH, with `gerrit create-group`.
+- The groups `Developers` and `Reviewers` carry the rights of the roles. The REST API of Gerrit 2.15 cannot create groups, so `accounts.sh` creates them over SSH, with `gerrit create-group`.
 
-`env/verify.sh` checks the role system, and with it the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it.
+Its `verify.sh` checks the role system, and with it the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it.
 
 ### The sign-in page of the environment
 
 The stack serves a sign-in page on `http://localhost:3001/`. It lists the two systems and, for each of them, the three roles; one click signs the role in and opens the system **in a new tab**, so the page stays open. The page shows which role is signed in for each system, and it asks the browser every few seconds, so a sign-in that happened in the other tab shows up here. Signing in as another role replaces the session of that system only.
 
-The service is `env/login/server.py`, a program of the Python standard library. It keeps two sessions:
+The service is `login/server.py` of that repository, a program of the Python standard library. It keeps two sessions:
 
 | System | What the page stores | How the session lasts |
 | --- | --- | --- |
-| Gerrit | the cookies `dsh_auth` (the login of the role) and `dsh_web` (the identity the browser is recognised by) | the front end of the review server, `env/gerrit/nginx.conf`, hands those credentials over to Gerrit instead of challenging the browser |
+| Gerrit | the cookies `dsh_auth` (the login of the role) and `dsh_web` (the identity the browser is recognised by) | the front end of the review server, `gerrit/nginx.conf`, hands those credentials over to Gerrit instead of challenging the browser |
 | Redmine | the cookie `_redmine_session`, the session of Redmine itself | the service signs in against the login form of Redmine and hands its session cookie to the browser; the session of Redmine lasts 30 days |
 
 The review server needs two credentials, because Gerrit looks an account up in two ways: its API takes the login, while its web UI takes the external id `gerrit:<login>`, which only the accounts that Gerrit's own login flow created carry; the other accounts are recognised in the browser by their e-mail address. The sign-in page asks Gerrit which of the two it accepts and stores the answer, so the web UI of the review server answers for every role.

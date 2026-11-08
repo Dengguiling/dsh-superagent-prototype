@@ -23,7 +23,7 @@ The company has three roles, and both systems know them:
 | `lead` — the leader | "Wang Lei", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
 | `dev` — the developer | "Zhang Wei", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
 
-The passwords, the API keys and the addresses of the local environment are in `env/.env`; `env/README.md` describes the stack in full.
+The passwords, the API keys and the addresses of the local environment are in the `.env` of the repository `dsh-superagent-env`; its README describes the stack in full.
 
 ## What this deployment uses
 
@@ -172,12 +172,12 @@ The host binds that change to the Ticket, so the review comments on it reach the
 | The developer may not merge the patch | Gerrit asks for a review by somebody else: the author of a change may not submit it. The leader reviews the change, gives it Code-Review +2 and merges it |
 | The push is refused with `same Change-Id in multiple changes` | The branch carries a second commit with the same `Change-Id`. Amend the commit instead of adding one |
 | The worker's git asks for a host key | dsh-superagent writes `core.sshCommand` with `StrictHostKeyChecking=no`; a worker that pushes outside its Ticket directory does not use it |
-| The sign-in page does not open a system | The role has no account yet, or the stack is not up. `env/accounts.sh` provisions the roles of the company, and `env/README.md` lists the addresses |
+| The sign-in page does not open a system | The role has no account yet, or the stack is not up. `accounts.sh` of the environment provisions the roles of the company, and its README lists the addresses |
 
 ## The local environment
 
-`env/` holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13 behind an nginx proxy, and a sign-in page on `http://localhost:3001/` that opens either system with one click per role, in a new tab. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are written by the leader and assigned to the developer.
+The repository `dsh-superagent-env`, next to the plugin, holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13 behind an nginx proxy, and a sign-in page on `http://localhost:3001/` that opens either system with one click per role, in a new tab. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are written by the leader and assigned to the developer.
 
-`env/accounts.sh` provisions the three roles on a running stack, and `env/seed.sh` calls it before it seeds the projects and the issues. `env/verify.sh` checks the roles and with them the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it. See `env/README.md` for every address, account, API key and SSH key of that stack, and `env/.env` for the credentials themselves.
+Its `accounts.sh` provisions the three roles on a running stack, and its `seed.sh` calls it before it seeds the projects and the issues. Its `verify.sh` checks the roles and with them the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it. Its README has every address, account, API key and SSH key of that stack, and its `.env` the credentials themselves.
 
 `scripts/live/redmine.ts` and `scripts/live/gerrit.ts` check the two Sources against a running Redmine and Gerrit: they list the changed issues and the open changes, read one with its journals and its comments, post a note and a review message, and run a poll round that must turn an issue, a journal and a review comment into Triggers. Run them with `npx vite-node scripts/live/redmine.ts` and the addresses and credentials of the environment as `REDMINE_URL`, `REDMINE_KEY`, `REDMINE_LOGIN`, `REDMINE_NAME`, `REDMINE_ID`, `REDMINE_PROJECT`, `GERRIT_URL`, `GERRIT_USER`, `GERRIT_PASS`, `GERRIT_PROJECT` and `GERRIT_BRANCH`.

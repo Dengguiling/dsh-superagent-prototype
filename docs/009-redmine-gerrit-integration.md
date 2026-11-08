@@ -27,7 +27,7 @@ Every non-obvious claim in this document carries one of these markers:
 
 ### 0.3 Environment used for the live checks
 
-The checks below ran against local Redmine 4.2 and Gerrit 2.15.13 containers. In the corporate deployment one Redmine account is bound to the Source (the operator's own account, `agent` in the checks below) and a separate Gerrit account is the one the agent pushes with; `env/` holds that scenario as a Docker Compose stack, with the demo SDK seeded in it, and `env/README.md` has every address, account, API key and SSH key of it.
+The checks below ran against local Redmine 4.2 and Gerrit 2.15.13 containers. In the corporate deployment one Redmine account is bound to the Source (the operator's own account, `agent` in the checks below) and a separate Gerrit account is the one the agent pushes with; The repository `dsh-superagent-env`, next to this one, holds that scenario as a Docker Compose stack, with the demo SDK seeded in it, and its README has every address, account, API key and SSH key of it.
 
 | Component | Address | Credentials used |
 |---|---|---|
