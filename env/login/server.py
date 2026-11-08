@@ -386,9 +386,9 @@ PAGE = string.Template(
 <body>
 <main class="wrap">
   <h1>Sign in</h1>
-  <p class="lede">Choose a role and the system opens with it. The sign-in is
-  remembered by the browser, so a session that is gone does not mean typing a
-  password again.</p>
+  <p class="lede">Choose a role and the system opens with it in a new tab, so
+  this page stays open. The sign-in is remembered by the browser, so a session
+  that is gone does not mean typing a password again.</p>
   $banner
   $cards
   <footer>
@@ -399,6 +399,45 @@ PAGE = string.Template(
     <code>_redmine_session</code>.
   </footer>
 </main>
+<script>
+  // The systems open in another tab, so this page keeps the state of the
+  // sessions: it asks who is signed in and marks the role.
+  const escapeHtml = (text) => String(text).replace(/[&<>"]/g, (character) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character])
+
+  const stateText = (system, role, label) => role
+    ? 'Signed in as <strong>' + escapeHtml(label) + '</strong> <span class="chip">' +
+      escapeHtml(role) + '</span> &middot; <a class="signout" href="/signout?system=' +
+      escapeHtml(system) + '">sign out</a>'
+    : 'Nobody is signed in'
+
+  const refresh = async () => {
+    let who
+    try {
+      const answer = await fetch('/whoami', { headers: { accept: 'application/json' } })
+      if (!answer.ok) return
+      who = await answer.json()
+    } catch { return }
+    for (const system of ['redmine', 'gerrit']) {
+      const card = document.querySelector('[data-system="' + system + '"]')
+      if (!card) continue
+      const role = (who[system] && who[system].role) || null
+      const label = (who[system] && who[system].role_label) || role
+      const state = card.querySelector('.state')
+      if (state) {
+        const text = stateText(system, role, label)
+        // only when it changed, so a click on "sign out" is never in the way
+        if (state.dataset.text !== text) { state.dataset.text = text; state.innerHTML = text }
+      }
+      for (const button of card.querySelectorAll('.role')) {
+        button.classList.toggle('current', button.dataset.role === role)
+      }
+    }
+  }
+
+  refresh()
+  setInterval(refresh, 5000)
+</script>
 </body>
 </html>
 """
@@ -406,14 +445,31 @@ PAGE = string.Template(
 
 
 def role_button(system, key, label, note, login, current):
-    """One role of a system: the button that signs in and opens it."""
+    """One role of a system: the button that signs in and opens it.
+
+    The system opens in a new tab, so this page stays open and the person does
+    not have to come back to it to switch the role of the other system.
+    """
     active = " current" if current == key else ""
     return (
-        f'<a class="role{active}" href="/signin/{system}?role={key}">'
+        f'<a class="role{active}" href="/signin/{system}?role={key}" '
+        f'data-role="{html.escape(key)}" target="_blank" rel="noopener">'
         f'<span class="role-label">{html.escape(label)}</span>'
         f'<span class="role-note">{html.escape(note)}</span>'
         f'<span class="role-login">{html.escape(login or key)}</span>'
         "</a>"
+    )
+
+
+def state_html(system, role):
+    """Who is signed in for a system; the page keeps it in the same shape."""
+    if not role:
+        return "Nobody is signed in"
+    return (
+        f"Signed in as <strong>{html.escape(ROLE_LABELS.get(role, role))}</strong>"
+        f' <span class="chip">{html.escape(role)}</span>'
+        f' &middot; <a class="signout" href="/signout?system={html.escape(system)}">'
+        f"sign out</a>"
     )
 
 
@@ -423,18 +479,9 @@ def system_card(system, title, subtitle, url, accounts, current):
         role_button(system, key, label, ROLE_NOTES[system][key], accounts[key][0], current)
         for key, label in ROLES
     )
-    if current:
-        state = (
-            f'<p class="state">Signed in as <strong>'
-            f"{html.escape(ROLE_LABELS[current])}</strong>"
-            f' <span class="chip">{html.escape(current)}</span>'
-            f' &middot; <a class="signout" href="/signout?system={html.escape(system)}">'
-            f"sign out</a></p>"
-        )
-    else:
-        state = '<p class="state">Nobody is signed in</p>'
+    state = f'<p class="state">{state_html(system, current)}</p>'
     return (
-        '<section class="card">'
+        f'<section class="card" data-system="{html.escape(system)}">'
         '<div class="card-head"><div>'
         f"<h2>{html.escape(title)}</h2>"
         f'<p class="sub">{html.escape(subtitle)} &middot; '

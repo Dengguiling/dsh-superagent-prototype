@@ -79,7 +79,7 @@ The passwords, the API keys and the addresses are in `env/.env`, which is the so
 
 ### The sign-in page of the environment
 
-The stack serves a sign-in page on `http://localhost:3001/`. It lists the two systems and, for each of them, the three roles; one click signs the role in and opens the system. Signing in as another role replaces the session of that system only.
+The stack serves a sign-in page on `http://localhost:3001/`. It lists the two systems and, for each of them, the three roles; one click signs the role in and opens the system **in a new tab**, so the page stays open. The page shows which role is signed in for each system, and it asks the browser every few seconds, so a sign-in that happened in the other tab shows up here. Signing in as another role replaces the session of that system only.
 
 The service is `env/login/server.py`, a program of the Python standard library. It keeps two sessions:
 

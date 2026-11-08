@@ -117,7 +117,8 @@ can sign in.
 ## 2a. The sign-in page
 
 **<http://localhost:3001>** — one page, one button per role, one click signs
-the person in and opens the system.
+the person in and opens the system **in a new tab**, so the page stays open
+and the person does not have to come back to it.
 
 ```bash
 docker compose up -d signin     # starts the sign-in page (port 3001)
@@ -126,9 +127,11 @@ docker compose up -d signin     # starts the sign-in page (port 3001)
 The page lists the two systems and, for each of them, the three roles of the
 environment — **administrator** (`admin`), **leader** (`lead`) and **developer**
 (`dev`) — and it shows which role is signed in for each system right now. A
-click on a role signs that role in and opens the system: Redmine goes to
-<http://localhost:3000>, the review server to <http://localhost:8080>. Signing
-in as another role **replaces** the session of that system.
+click on a role signs that role in and opens the system in a new tab: Redmine
+goes to <http://localhost:3000>, the review server to <http://localhost:8080>.
+This page stays open, and it shows which role is signed in for each system (it
+asks the browser every few seconds). Signing in as another role **replaces**
+the session of that system.
 
 The sign-in does not expire on its own:
 

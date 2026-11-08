@@ -176,7 +176,7 @@ The host binds that change to the Ticket, so the review comments on it reach the
 
 ## The local environment
 
-`env/` holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13 behind an nginx proxy, and a sign-in page on `http://localhost:3001/` that opens either system with one click per role. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are written by the leader and assigned to the developer.
+`env/` holds a Docker Compose stack that runs this environment locally: Redmine 4.2 with PostgreSQL, and Gerrit 2.15.13 behind an nginx proxy, and a sign-in page on `http://localhost:3001/` that opens either system with one click per role, in a new tab. It carries two repositories — a small demo SDK and its CLI — seeded with real defects, and the Redmine issues that describe them are written by the leader and assigned to the developer.
 
 `env/accounts.sh` provisions the three roles on a running stack, and `env/seed.sh` calls it before it seeds the projects and the issues. `env/verify.sh` checks the roles and with them the whole flow of the company: the developer pushes a patch to a scratch repository, may not merge it, and the leader reviews it and merges it. See `env/README.md` for every address, account, API key and SSH key of that stack, and `env/.env` for the credentials themselves.
 
