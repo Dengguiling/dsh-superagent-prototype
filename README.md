@@ -10,6 +10,20 @@ The company setup is the point of it: a person opens an issue in Redmine, the ag
 
 It is also a way of working with an agent: **take as little human attention as possible, and give as much value as possible.** An agent that can act for a whole team can also waste a whole team's attention, so it acts only when asked or when a rule the team wrote allows it, and speaks only when someone must act or can use a result. [docs/000-philosophy.md](docs/000-philosophy.md) explains the principle and what it asks of the operator.
 
+## What this fork changes
+
+This repository is a fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), seventeen commits ahead of its publication snapshot, and rebased onto it so the histories stay in sync. The changes are two groups of work:
+
+**A full code review, and the fixes it produced.** The review covered the plugin and its companion test environment; every finding came with a regression test where one could be written.
+
+- The Sources deliver reliably: a hidden marker counts only when the agent's own account wrote it, so nobody can forge one to silence a comment; the panel's reply and its poll backstop share one trigger id, so a crash between them delivers once; a round that cannot read an issue keeps its poll window, so no update is lost; Redmine and Gerrit lists page past their first page; the first Gerrit round records what it saw instead of receiving it; a stale-object conflict is a retry, not a `gone`.
+- The core and its plumbing keep working when one record is broken: one failing thread no longer stops a whole pass; a deadline an older version wrote in another form expires instead of wedging every Eval; the state-directory lock waits out the stale window of a crashed process; notice injection retries a transient failure; settled receipts are pruned; the worker's git checks the review server's host key after the first connection.
+- The executor no longer cancels a worker's own `ready` report when its last Input landed in the same millisecond.
+- The panel fixes what an operator touches: the pause switch reflects at once, the flow page reads the panel's one task poll, the prompt preview is debounced and keeps its last result on a failure, fetches time out, and a garbled wording is repaired.
+- Authorization is unchanged in design and re-verified: the gate admits by relation and by the admission table, and no path lets an unlisted sender gain strength. The documents (SETUP, [006](docs/006-deployment.md), [010](docs/010-corporate-redmine-gerrit.md), [011](docs/011-interaction-scenarios.md)) now describe that design as the code builds it, and a gray list keeps the retired instructions out. Both repositories run their checks in CI.
+
+**The development history the snapshot predates.** The publication snapshot stops before the panel became a workbench, a pipeline and settings with the signal rail above every page; before the interaction walkthrough ([011](docs/011-interaction-scenarios.md)); before the companion [`dsh-superagent-env`](https://github.com/Dengguiling/dsh-superagent-env) repository, which runs the corporate scenario on real Redmine and Gerrit containers and keeps its ports on the loopback, generates its keys instead of committing them, and leaves the merge with the leader.
+
 ## Setup
 
 Setup has many steps, so an agent does it with you. Ask your coding agent:
