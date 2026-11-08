@@ -19,9 +19,9 @@ The company has three roles, and both systems know them:
 
 | Role | Redmine | Gerrit |
 | --- | --- | --- |
-| `admin` — the system administrator | "System Administrator", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
-| `lead` — the leader | "Team Leader", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
-| `dev` — the developer | "Software Developer", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
+| `admin` — the system administrator | "系统管理员", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
+| `lead` — the leader | "团队负责人", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
+| `dev` — the developer | "开发工程师", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
 
 The passwords, the API keys and the addresses of the local environment are in the `.env` of the repository `dsh-superagent-env`; its README describes the stack in full.
 
@@ -39,7 +39,7 @@ The passwords, the API keys and the addresses of the local environment are in th
 
 The superagent binds to the developer and to nobody else:
 
-- the Redmine account is `dev`, "Software Developer", and the Redmine Source takes the issues assigned to it;
+- the Redmine account is `dev`, "开发工程师", and the Redmine Source takes the issues assigned to it;
 - the Gerrit account is `dev`, and the SSH address of the Source is `ssh://dev@localhost:29418`;
 - there is no account of the agent's own, in neither system.
 
@@ -113,7 +113,11 @@ Under *Settings* → *Policy* → *Eval → On each Source*, the Redmine Source 
 
 | Source | The allowed entry | What it allows |
 | --- | --- | --- |
-| Redmine | `Team Leader`, the display name Redmine shows | the issues and the journals of the leader start the work |
+| Redmine | `团队负责人`, the display name Redmine shows | the issues and the journals of the leader start the work |
+
+The names are trimmed before they are compared: Redmine joins the first and the
+last name of an account with a space, and a Chinese name has no first name, so
+the name arrives with a leading space.
 | Gerrit | `lead`, the user name Gerrit reports | the review comments of the leader start the follow-up work |
 
 Redmine's API reports the **display name** of an author beside its id, and no login, so the Redmine list holds the names Redmine shows. The Gerrit list holds the user names of Gerrit, which is what its API reports.

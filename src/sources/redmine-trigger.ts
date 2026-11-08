@@ -50,9 +50,11 @@ export type RedmineIssue = z.infer<typeof IssueSchema>
 
 /**
  * The identity of a Redmine user in the vocabulary the Policy lists. The API reports a display name beside the id, and
- * no login, so the name is what a person sees in Redmine and what a Policy entry names.
+ * no login, so the name is what a person sees in Redmine and what a Policy entry names.  The name is trimmed: the API
+ * joins the first and the last name with a space, and a name that has no first name arrives with a leading space.
  */
-export const actorOf = (user: RedmineUser | null | undefined): string => user?.name ?? user?.login ?? (user?.id ? String(user.id) : '')
+export const actorOf = (user: RedmineUser | null | undefined): string =>
+  (user?.name ?? user?.login ?? (user?.id ? String(user.id) : '')).trim()
 /** The display name of a Redmine user. */
 export const nameOf = (user: RedmineUser | null | undefined): string =>
   [user?.firstname, user?.lastname].filter(Boolean).join(' ') || user?.name || actorOf(user)

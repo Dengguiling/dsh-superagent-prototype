@@ -16,5 +16,5 @@ export function checkedImText(text: string): string {
 }
 export const fill = (template: string, values: Record<string, string>): string => template.replace(/\{(\w+)\}/g, (_, name: string) => values[name] ?? '')
 /** Case-insensitive comparison for account names and project names. */
-export const sameName = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
+export const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

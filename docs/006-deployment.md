@@ -62,9 +62,9 @@ The repository `dsh-superagent-env`, next to this one, holds a Docker Compose st
 
 | Role | Redmine, `http://localhost:3000` | Gerrit, `http://localhost:8080` |
 | --- | --- | --- |
-| `admin` | "System Administrator", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
-| `lead` | "Team Leader", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
-| `dev` | "Software Developer", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
+| `admin` | "系统管理员", the system manager: the highest rights, kept out of the tests | the system manager: the highest rights, kept out of the tests |
+| `lead` | "团队负责人", the leader: assigns the work to the developer | the team leader: reviews the patches and merges them, and holds the merge right on the repositories |
+| `dev` | "开发工程师", the developer: takes the tasks and starts the superagent | the developer: submits the patches and hands them to the leader for review |
 
 The passwords, the API keys and the addresses are in the `.env` of that repository, which is the source of truth for the stack; its README describes it in full.
 

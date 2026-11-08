@@ -100,7 +100,7 @@ const RULES: [rule: string, file: string, says: string[], gone?: string[]][] = [
   ['Reading context changes nothing', 'cli', ['Do not alter remote state, authorization, or configuration while reading.']],
   ['Feishu is read as the bot, never as a person', 'cli', ['Feishu uses --as bot; unavailable content does not authorize switching to the user\'s identity.']],
   ['Every note on the task system and every review message says an automated agent wrote it', 'team/communication',
-    ['Begin every note posted on an issue of the task system, and every review message on a change, with this line: This is by an automated agent, not a human.']],
+    ['Begin every note posted on an issue of the task system, and every review message on a change, with this line, in the language of the conversation: This is by an automated agent, not a human.']],
   ['Removed rules stay removed', '*', [], ['at most three investigation/implementation rounds', 'continue dispatch until explicitly instructed', 'page-size']],
 ]
 const textOf = (file: string) => file === '*' ? composePrompt(defaultPrompts(), 'orchestrator') + composePrompt(defaultPrompts(), 'worker')
