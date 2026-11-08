@@ -33,6 +33,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
 - [009 Redmine and Gerrit integration](docs/009-redmine-gerrit-integration.md): the task system and the review server, their APIs and their quirks
 - [010 Corporate Redmine and Gerrit](docs/010-corporate-redmine-gerrit.md): running the agent where Redmine holds the tasks and Gerrit holds the patches
+- [011 交互场景清单](docs/011-interaction-scenarios.md): the situations the agent meets, one by one
 
 ## Development
 
