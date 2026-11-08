@@ -176,7 +176,8 @@ function taskOf(issue: RedmineIssue, account: RedmineAccount, held: Map<number, 
     : stage ? 'working' : decline ? 'declined' : 'undecided'
   return {
     id: issue.id, subject: issue.subject, status: issue.status?.name ?? '', priority: issue.priority?.name ?? '',
-    assignee: issue.assigned_to?.name ?? '', author: issue.author?.name ?? '',
+    // The API joins the first and the last name of an account with a space; a name without a first name arrives with a leading one.
+    assignee: (issue.assigned_to?.name ?? '').trim(), author: (issue.author?.name ?? '').trim(),
     project,
     updated: issue.updated_on ?? '', url: redminePage(account.baseUrl, issue.id),
     state,

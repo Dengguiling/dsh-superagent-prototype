@@ -149,7 +149,11 @@ export class Runtime extends Service implements SourceHost {
           if (ended && setup.configured()) {
             const request = store.triggers.get(ended.origin.triggerId)?.text ?? ''
             const gerrit = setup.deployment.gerrit
-            if (gerrit) for (const message of changeEndNotices(ended, request, gerrit.httpUrl, gerrit.project)) outbox.send(message)
+            // The link names the repository the change lives in; the deployment's own project is empty in a company with
+            // many repositories, so the project comes from the thread of the change the ticket follows.
+            const follow = (ended.follows ?? []).find(item => item.thread.startsWith('gerrit:'))
+            const project = follow ? String(store.threads.get(follow.thread)?.meta.project ?? '') : ''
+            if (gerrit) for (const message of changeEndNotices(ended, request, gerrit.httpUrl, project)) outbox.send(message)
           }
         } })
       // Update the `evals` health entry on every pass if an evaluation failed as unavailable within the last hour.
